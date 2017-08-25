@@ -5,6 +5,8 @@ defmodule Dhcp.Test.Binding do
   @gateway_address {192, 168, 0, 1}
   @client_1 {11, 22, 33, 44, 55, 66}
   @client_2 {22, 33, 44, 55, 66, 77}
+  @client_3 {33, 44, 55, 66, 77, 88}
+  @client_4 {44, 55, 66, 77, 88, 99}
 
   defp check_timer_start time, pid, mac, addr do
     receive do
@@ -69,6 +71,23 @@ defmodule Dhcp.Test.Binding do
     check_timer_start(86400, pid, @client_1, {192, 168, 0, 3})
     assert Dhcp.Binding.get_offer_address(pid, @client_1, nil) ==
       {:ok, {192, 168, 0, 3}}
+  end
+
+  test "handles running out of addresses", %{bindings: pid} do
+    assert Dhcp.Binding.get_offer_address(pid, @client_1, nil) ==
+      {:ok, {192, 168, 0, 3}}
+    assert Dhcp.Binding.allocate_address(pid, @client_1, {192, 168, 0, 3}) ==
+      :ok
+    assert Dhcp.Binding.get_offer_address(pid, @client_2, nil) ==
+      {:ok, {192, 168, 0, 4}}
+    assert Dhcp.Binding.allocate_address(pid, @client_2, {192, 168, 0, 4}) ==
+      :ok
+    assert Dhcp.Binding.get_offer_address(pid, @client_3, nil) ==
+      {:ok, {192, 168, 0, 5}}
+    assert Dhcp.Binding.allocate_address(pid, @client_3, {192, 168, 0, 5}) ==
+      :ok
+    assert Dhcp.Binding.get_offer_address(pid, @client_4, nil) ==
+      {:error, :no_addresses}
   end
 end
 

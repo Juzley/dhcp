@@ -77,7 +77,7 @@ defmodule Dhcp.Binding do
         {:reply, {:error, :no_addresses}, state}
 
       addr ->
-        bindings = Map.put(state.bindings, client_mac, {addr, :offered})
+        bindings = Map.put(state.bindings, client_mac, {addr, :offered, 0})
         {:reply, {:ok, addr}, %{state | bindings: bindings}}
     end
   end
@@ -103,7 +103,7 @@ defmodule Dhcp.Binding do
   def handle_call({:release, client_mac, client_addr}, _from, state) do
     # TODO: Check that the address was actually allocated to the client
     # TODO: Cancel timer
-    bindings = Map.put(state.bindings, client_mac, {client_addr, :released})
+    bindings = Map.put(state.bindings, client_mac, {client_addr, :released, 0})
     {:reply, :ok, %{state | bindings: bindings}}
   end
 
@@ -120,12 +120,9 @@ defmodule Dhcp.Binding do
     # Before step 4, we also consider whether we have already offered the
     # client an address, and offer the same one if so.
     case Map.fetch(state.bindings, client_mac) do
-      {:ok, {addr, :allocated, _}} ->
-          addr
-
-      {:ok, {addr, class}} ->
+      {:ok, {addr, class, _}} ->
         cond do
-          class == :released ->
+          class in [:allocated, :released] ->
             addr
 
           req_acceptable ->
@@ -180,8 +177,8 @@ defmodule Dhcp.Binding do
   # Get a MapSet of all addresses of a particular binding class.
   defp get_addresses(state, class) do
     Map.values(state.bindings)
-    |> Enum.filter(fn({_, c}) -> c == class end)
-    |> Enum.map(fn({a, _}) -> a end)
+    |> Enum.filter(fn({_, c, _}) -> c == class end)
+    |> Enum.map(fn({a, _, _}) -> a end)
     |> MapSet.new()
   end
 
