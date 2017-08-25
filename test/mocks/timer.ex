@@ -1,6 +1,8 @@
 defmodule Dhcp.Test.Timer do
-  def apply_after time, module, func, args do
-    send(self(), {time, args})
+  def apply_after time, _module, _func, args do
+    [{_, parent}] = :ets.lookup(:parent_pid, self())
+    send(parent, {time, args})
+
     {:ok, 0}
   end
 end

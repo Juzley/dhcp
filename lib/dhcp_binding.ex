@@ -19,8 +19,18 @@ defmodule Dhcp.Binding do
   end
 
   @doc """
+  Stops the GenServer.
+  """
+  def stop(pid) do
+    GenServer.stop(pid)
+  end
+
+  @doc """
   Get an address to offer to client with MAC `client_mac`, optionally
   considering an address requested by the client.
+
+  Returns {`:ok`, address} with the address to offer if successful, or
+  {`:error`, `:no_addresses`} if there are no free addresses left in the pool.
   """
   def get_offer_address(pid, client_mac, client_req \\ nil) do
     GenServer.call(pid, {:offer, client_mac, client_req})
@@ -30,20 +40,28 @@ defmodule Dhcp.Binding do
   Allocate an address to a client with MAC `client_mac`, if the address is
   not already allocated.
 
-  Returns `:ok` if the address was allocated or {`:error`, `:address_allocated}
-  if the address was already allocated.
+  Returns `:ok` if the address was allocated or
+  {`:error`, `:address_allocated`} if the address was already allocated.
   """
   def allocate_address(pid, client_mac, client_addr) do
     GenServer.call(pid, {:allocate, client_mac, client_addr})
   end
 
+  @doc """
+  Release the address bound to a client.
+
+  Returns `:ok` in all cases.
+  """
   def release_address(pid, client_mac, client_addr) do
+    # TODO: Do we actually need to pass the client addr?
+    # TODO: COuld this be a cast rather than a call?
     GenServer.call(pid, {:release, client_mac, client_addr})
   end
 
 
   # Server API
 
+  # Initialize an instance of the binding GenServer.
   def init({server_address, gateway_address, min_address, max_address}) do
     {:ok, %{server_address: server_address,
             gateway_address: gateway_address,
@@ -52,12 +70,19 @@ defmodule Dhcp.Binding do
             bindings: %{}}}
   end
 
+  # Handle an 'offer' call.
   def handle_call({:offer, client_mac, client_req}, _from, state) do
-    addr = offer_address(client_mac, client_req, state)
-    bindings = Map.put(state.bindings, client_mac, {addr, :offered})
-    {:reply, {:ok, addr}, %{state | bindings: bindings}}
+    case offer_address(client_mac, client_req, state) do
+      nil ->
+        {:reply, {:error, :no_addresses}, state}
+
+      addr ->
+        bindings = Map.put(state.bindings, client_mac, {addr, :offered})
+        {:reply, {:ok, addr}, %{state | bindings: bindings}}
+    end
   end
 
+  # Handle an 'allocate' call.
   def handle_call({:allocate, client_mac, addr}, _from, state) do
     if address_available?(state, addr) do
       {:ok, timer_ref} = @timer.apply_after(86400,
@@ -74,6 +99,7 @@ defmodule Dhcp.Binding do
     end
   end
 
+  # Handle a 'release' call.
   def handle_call({:release, client_mac, client_addr}, _from, state) do
     # TODO: Check that the address was actually allocated to the client
     # TODO: Cancel timer
@@ -81,15 +107,25 @@ defmodule Dhcp.Binding do
     {:reply, :ok, %{state | bindings: bindings}}
   end
 
+  # Determine the address to respond to an offer request with.
   defp offer_address(client_mac, client_req, state) do
-    # TODO: Check the client req address is in the right subnet.
     req_acceptable =
-     client_req != nil and address_available?(state, client_req)
+      client_req != nil and address_available?(state, client_req)
 
+    # From the RFC, consider addresses to offer in the following order:
+    # 1. The address that is currently bound to the client.
+    # 2. The address that was previously bound to the client.
+    # 3. The address requested by the client.
+    # 4. A free address from the pool.
+    # Before step 4, we also consider whether we have already offered the
+    # client an address, and offer the same one if so.
     case Map.fetch(state.bindings, client_mac) do
+      {:ok, {addr, :allocated, _}} ->
+          addr
+
       {:ok, {addr, class}} ->
         cond do
-          class in [:allocated, :released] ->
+          class == :released ->
             addr
 
           req_acceptable ->
@@ -119,6 +155,7 @@ defmodule Dhcp.Binding do
 
   # Determine whether a given address is available
   defp address_available?(state, addr) do
+    # TODO: Check whether the address is in the pool also.
     not MapSet.member?(unavailable_addresses(state), addr)
   end
 
@@ -148,7 +185,7 @@ defmodule Dhcp.Binding do
     |> MapSet.new()
   end
 
-  # Get the current full address pool for the subnet.
+  # Get the current full address pool for the subnet, as a list.
   defp address_pool state do
     min = address_to_int(state.min_address)
     max = address_to_int(state.max_address)
