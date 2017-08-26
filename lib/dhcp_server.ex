@@ -2,6 +2,8 @@ defmodule Dhcp.Server do
   use GenServer
   require Logger
 
+  @udp Application.get_env(:dhcp, :udp_impl, :gen_udp)
+
   # Client API
 
   def start do
@@ -11,7 +13,7 @@ defmodule Dhcp.Server do
   # Server API
 
   def init(:ok) do
-    case :gen_udp.open(67) do
+    case @udp.open(67) do
       {:ok, socket} ->
         {:ok, %{socket: socket}}
       {:error, reason} ->
@@ -43,8 +45,8 @@ defmodule Dhcp.Server do
     state
   end
 
-  defp handle_discover(packet, state) do
-    :gen_udp.send(state.socket, {255, 255, 255, 255}, 68, "jkl")
+  def handle_discover(packet, state) do
+    @udp.send(state.socket, {255, 255, 255, 255}, 68, "jkl")
 
     state
   end

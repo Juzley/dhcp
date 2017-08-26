@@ -1,4 +1,4 @@
-defmodule Dhcp.PacketTest do
+defmodule Dhcp.Test.Packet do
     use ExUnit.Case
     doctest Dhcp.Packet
 

@@ -6,6 +6,7 @@ defmodule Dhcp.Mixfile do
       app: :dhcp,
       version: "0.1.0",
       elixir: "~> 1.5",
+      elixirc_paths: elixirc_paths(Mix.env),
       start_permanent: Mix.env == :prod,
       deps: deps()
     ]
@@ -18,8 +19,11 @@ defmodule Dhcp.Mixfile do
     ]
   end
 
+  defp elixirc_paths(:test), do: ["lib", "test/mocks"]
+  defp elixirc_paths(_), do: ["lib"]
+
   # Run "mix help deps" to learn about dependencies.
   defp deps do
-    [{:mock, "~> 0.2.0", only: :test}]
+    []
   end
 end
