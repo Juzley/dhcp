@@ -1,5 +1,48 @@
 defmodule Dhcp.Packet do
-  defstruct [:op, options: %{}]
+  defstruct [
+    :op, :xid, :ciaddr, :yiaddr, :siaddr, :giaddr, :chaddr, options: %{}]
+
+  @cookie 0x63825363
+
+  def frame(packet) do
+    options = frame_options(packet.options)
+
+    <<packet.op     :: size(8),
+      1             :: size(8),               # Hardware type, Ethernet
+      6             :: size(8),               # MAC address length
+      0             :: size(8),               # Hops
+      packet.xid    :: big-unsigned-size(32),
+      0             :: size(8),               # Seconds
+      0             :: size(16),              # Flags
+      packet.ciaddr :: bitstring-size(32),
+      packet.yiaddr :: bitstring-size(32),
+      packet.siaddr :: bitstring-size(32),
+      packet.giaddr :: bitstring-size(32),
+      packet.chaddr :: bitstring-size(48),
+      0             :: size(80),              # Hardware address padding
+      0             :: size(512),             # Server name (bootp legacy)
+      0             :: size(1024),            # Filename (bootp legacy)
+      @cookie       :: big-unsigned-size(32), # DHCP magic cookie
+      options       :: binary,
+      255           :: size(8)>>
+  end
+
+  defp frame_options(options) do
+    options
+    |> Map.to_list
+    |> Enum.map(&frame_option/1)
+    |> List.foldr(<<>>, fn(option, acc) -> option <> acc end)
+  end
+
+  defp frame_option({53, val}), do: <<53::8, 1::8, val::8>>
+
+  defp frame_option({option, val}) when option in [1, 54] do
+    <<option :: 8, 4 :: 8, val :: bitstring-size(32)>>
+  end
+
+  defp frame_option({option, val}) when option in [51, 58, 59] do
+    <<option :: 8, 4 :: 8, val :: big-unsigned-size(32)>>
+  end
 
   def parse(data) do
     try do
@@ -8,7 +51,7 @@ defmodule Dhcp.Packet do
         _udp_header     :: binary-size(8),
         op              :: size(8),
         1               :: size(8),               # Hardware type, Ethernet
-        6               :: size(8),               # Hardware address length, MAC
+        6               :: size(8),               # MAC address length
         _hops           :: size(8),
         xid             :: big-unsigned-size(32), # Transaction ID
         _secs           :: big-unsigned-size(16),
@@ -21,11 +64,19 @@ defmodule Dhcp.Packet do
         _chaddr_pad     :: binary-size(10),       # Hardware address padding
         _sname          :: binary-size(64),
         _filename       :: binary-size(128),     
-        0x63825363      :: big-unsigned-size(32), # DHCP magic cookie
+        @cookie         :: big-unsigned-size(32), # DHCP magic cookie
         option_data     :: binary>> = data
 
         options = parse_options(option_data, %{}) 
-        packet = %Dhcp.Packet{op: op, options: options} 
+        packet = %Dhcp.Packet{
+          op: op,
+          xid: xid,
+          ciaddr: ciaddr,
+          yiaddr: yiaddr,
+          siaddr: siaddr,
+          giaddr: giaddr,
+          chaddr: chaddr,
+          options: options} 
 
         {:ok, packet}
     rescue
