@@ -23,11 +23,20 @@ defmodule Dhcp.Server do
   # Server API
 
   def init(:ok) do
-    case @udp.open(@dhcp_server_port) do
-      {:ok, socket} ->
-        {:ok, %{socket: socket, bindings: %{}}}
-      {:error, reason} ->
-        {:stop, reason}
+    {udp_res, udp_val} = @udp.open(@dhcp_server_port)
+    {bind_res, binding_val} =
+      Dhcp.Binding.start(@server_address_bytes,
+                         @gateway_address_bytes)
+
+    case {udp_res, bind_res} do
+      {:ok, :ok} ->
+        {:ok, %{socket: udp_val, bindings: binding_val}}
+
+      {:error, _} ->
+        {:stop, udp_val}
+
+      _ ->
+        {:stop, binding_val}
     end
   end
 
@@ -50,6 +59,9 @@ defmodule Dhcp.Server do
       1 ->
         handle_discover(state, packet)
 
+      3 ->
+        handle_request(state, packet)
+
       msg_type ->
         Logger.debug "Ignoring DHCP message type #{msg_type}"
     end
@@ -61,11 +73,15 @@ defmodule Dhcp.Server do
   defp handle_discover(state, packet) do
     requested_address = Map.get(packet.options, 50)
 
+    offer_address = Dhcp.Binding.get_offer_address(state.bindings,
+                                                   packet.chaddr,
+                                                   requested_address)
+
     offer_packet = Dhcp.Packet.frame(%{
       op: 2,
       xid: packet.xid,
       ciaddr: @empty_address_bytes,
-      yiaddr: offer_address(state, packet.chaddr, requested_address),
+      yiaddr: offer_address,
       siaddr: @server_address_bytes,
       giaddr: @gateway_address_bytes,
       chaddr: packet.chaddr,
@@ -86,49 +102,8 @@ defmodule Dhcp.Server do
     state
   end
 
-  # Find an offer address.
-  defp offer_address(state, client_mac, client_req) do
-    unavailable = unavailable_addresses(state)
-
-    # TODO: Hrm
-    case Map.get(state.bindings, client_mac) do
-      nil ->
-        if MapSet.member?(unavailable, client_req) do
-          free_address(state)
-        else
-          client_req
-        end
-
-      addr ->
-        addr
-    end
+  # Handle a request packet.
+  defp handle_request(state, packet) do
   end
 
-  # Get a MapSet of currently bound addresses.
-  defp bound_addresses(state) do
-    MapSet.new(Map.values(state.bindings))
-  end
-
-  # Find a free address
-  defp free_address(state) do
-    Enum.filter(address_pool, &(address_unavailable?(state, &1))) |> List.first
-  end
-
-  # Determine whether a given address is unavailable
-  defp address_unavailable?(state, addr) do
-    MapSet.member?(unavailable_addresses(state), addr)
-  end
-
-  # Get a MapSet of current unavailable addresses.
-  defp unavailable_addresses(state) do
-    state
-    |> bound_addresses
-    |> MapSet.put(@server_address_bytes)
-    |> MapSet.put(@gateway_address_bytes)
-  end
-
-  # Get the current full address pool for the subnet.
-  defp address_pool do
-    for n <- 1..255, do: <<192::8, 168::8, 0::8, n::8>>
-  end
 end
