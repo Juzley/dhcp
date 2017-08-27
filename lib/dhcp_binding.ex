@@ -40,12 +40,10 @@ defmodule Dhcp.Binding do
   end
 
   defp offer_address_check_expired(nil, client_mac, state) do
-    case Map.get(state.expired, client_mac) do
-      nil ->
-        nil
-
-      addr ->
-        if address_available?(state, addr), do: addr, else: nil
+    if addr = Map.get(state.expired, client_mac) do
+      if address_available?(state, addr), do: addr, else: nil
+    else
+      nil
     end
   end
 
