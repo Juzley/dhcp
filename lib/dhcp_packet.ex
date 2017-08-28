@@ -6,25 +6,30 @@ defmodule Dhcp.Packet do
 
   def frame(packet) do
     options = frame_options(packet.options)
+    ciaddr = ipv4_tuple_to_binary(packet.ciaddr)
+    yiaddr = ipv4_tuple_to_binary(packet.yiaddr)
+    siaddr = ipv4_tuple_to_binary(packet.siaddr)
+    giaddr = ipv4_tuple_to_binary(packet.giaddr)
+    chaddr = mac_tuple_to_binary(packet.chaddr)
 
-    <<packet.op     :: size(8),
-      1             :: size(8),               # Hardware type, Ethernet
-      6             :: size(8),               # MAC address length
-      0             :: size(8),               # Hops
-      packet.xid    :: big-unsigned-size(32),
-      0             :: size(8),               # Seconds
-      0             :: size(16),              # Flags
-      packet.ciaddr :: bitstring-size(32),
-      packet.yiaddr :: bitstring-size(32),
-      packet.siaddr :: bitstring-size(32),
-      packet.giaddr :: bitstring-size(32),
-      packet.chaddr :: bitstring-size(48),
-      0             :: size(80),              # Hardware address padding
-      0             :: size(512),             # Server name (bootp legacy)
-      0             :: size(1024),            # Filename (bootp legacy)
-      @cookie       :: big-unsigned-size(32), # DHCP magic cookie
-      options       :: binary,
-      255           :: size(8)>>
+    <<packet.op  :: size(8),
+      1          :: size(8),               # Hardware type, Ethernet
+      6          :: size(8),               # MAC address length
+      0          :: size(8),               # Hops
+      packet.xid :: big-unsigned-size(32),
+      0          :: size(8),               # Seconds
+      0          :: size(16),              # Flags
+      ciaddr     :: bitstring-size(32),
+      yiaddr     :: bitstring-size(32),
+      siaddr     :: bitstring-size(32),
+      giaddr     :: bitstring-size(32),
+      chaddr     :: bitstring-size(48),
+      0          :: size(80),              # Hardware address padding
+      0          :: size(512),             # Server name (bootp legacy)
+      0          :: size(1024),            # Filename (bootp legacy)
+      @cookie    :: big-unsigned-size(32), # DHCP magic cookie
+      options    :: binary,
+      255        :: size(8)>>
   end
 
   defp frame_options(options) do
@@ -71,11 +76,11 @@ defmodule Dhcp.Packet do
         packet = %Dhcp.Packet{
           op: op,
           xid: xid,
-          ciaddr: ciaddr,
-          yiaddr: yiaddr,
-          siaddr: siaddr,
-          giaddr: giaddr,
-          chaddr: chaddr,
+          ciaddr: ipv4_binary_to_tuple(ciaddr),
+          yiaddr: ipv4_binary_to_tuple(yiaddr),
+          siaddr: ipv4_binary_to_tuple(siaddr),
+          giaddr: ipv4_binary_to_tuple(giaddr),
+          chaddr: mac_binary_to_tuple(chaddr),
           options: options} 
 
         {:ok, packet}
@@ -103,12 +108,34 @@ defmodule Dhcp.Packet do
   defp parse_options(<<61::8, 7::8, 1::8,
                      mac_addr::bitstring-size(48),
                      remainder::binary>>, options) do
-    parse_options remainder, Map.put(options, 61, mac_addr)
+    parse_options remainder, Map.put(options,
+                                     61,
+                                     mac_binary_to_tuple(mac_addr))
   end
 
   # Skip other option types that we don't support
   defp parse_options(<<option::8, len::8, remainder::binary>>, options) do
     <<value :: binary-size(len), new_remainder :: binary>> = remainder
     parse_options(new_remainder, options)
+  end
+
+  # Convert an IPv4 in binary form to a tuple.
+  defp ipv4_binary_to_tuple <<oct4::8, oct3::8, oct2::8, oct1::8>> do
+    {oct4, oct3, oct2, oct1}
+  end
+
+  # Convert an IPv4 in tuple form to binary.
+  defp ipv4_tuple_to_binary {oct4, oct3, oct2, oct1} do
+    <<oct4::8, oct3::8, oct2::8, oct1::8>>
+  end
+
+  # Convert a MAC in binary form to a tuple.
+  defp mac_binary_to_tuple <<oct6::8, oct5::8, oct4::8, oct3::8, oct2::8, oct1::8>> do
+    {oct6, oct5, oct4, oct3, oct2, oct1}
+  end
+
+  # Convert a MAC in tuple form to binary.
+  defp mac_tuple_to_binary {oct6, oct5, oct4, oct3, oct2, oct1} do
+    <<oct6::8, oct5::8, oct4::8, oct3::8, oct2::8, oct1::8>>
   end
 end

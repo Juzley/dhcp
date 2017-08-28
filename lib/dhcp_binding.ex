@@ -4,6 +4,7 @@ defmodule Dhcp.Binding do
   """
 
   use GenServer
+  use Bitwise
 
   @timer Application.get_env(:dhcp, :timer_impl, :timer)
 
@@ -12,8 +13,9 @@ defmodule Dhcp.Binding do
   @doc """
   Starts the GenServer.
   """
-  def start(server_address, gateway_address) do
-    GenServer.start_link(__MODULE__, {server_address, gateway_address})
+  def start(server_address, gateway_address, min_addr, max_addr) do
+    GenServer.start_link(__MODULE__,
+                         {server_address, gateway_address, min_addr, max_addr})
   end
 
   @doc """
@@ -42,9 +44,11 @@ defmodule Dhcp.Binding do
 
   # Server API
 
-  def init({server_address, gateway_address}) do
+  def init({server_address, gateway_address, min_address, max_address}) do
     {:ok, %{server_address: server_address,
             gateway_address: gateway_address,
+            min_address: min_address,
+            max_address: max_address,
             bindings: %{}}}
   end
 
@@ -79,8 +83,9 @@ defmodule Dhcp.Binding do
 
   defp offer_address(client_mac, client_req, state) do
     # TODO: Check the client req address is in the right subnet.
-    binding = Map.fetch(state.bindings, client_mac)
-    req_acceptable = client_req != nil and address_available?(state, client_req)
+    req_acceptable =
+     client_req != nil and address_available?(state, client_req)
+
     case Map.fetch(state.bindings, client_mac) do
       {:ok, {addr, class}} ->
         cond do
@@ -104,7 +109,9 @@ defmodule Dhcp.Binding do
 
   # Find a free address - prefer addresses that haven't already been offered.
   defp free_address(state) do
-    address_pool()
+    # TODO: Handle running out of addresses.
+    state
+    |> address_pool()
     |> Enum.filter(&(address_available?(state, &1)))
     |> Enum.sort_by(&(if address_offered?(state, &1), do: 0, else: 1))
     |> List.first
@@ -127,10 +134,13 @@ defmodule Dhcp.Binding do
     |> MapSet.put(state.gateway_address)
   end
 
+  # Get a MapSet of all allocated addresses.
   defp allocated_addresses(state), do: get_addresses(state, :allocated)
 
+  # Get a MapSet of all offered addresses.
   defp offered_addresses(state), do: get_addresses(state, :offered)
 
+  # Get a MapSet of all addresses of a particular binding class.
   defp get_addresses(state, class) do
     Map.values(state.bindings)
     |> Enum.filter(fn({_, c}) -> c == class end)
@@ -139,7 +149,23 @@ defmodule Dhcp.Binding do
   end
 
   # Get the current full address pool for the subnet.
-  defp address_pool do
-    for n <- 1..255, do: <<192::8, 168::8, 0::8, n::8>>
+  defp address_pool state do
+    min = address_to_int(state.min_address)
+    max = address_to_int(state.max_address)
+    for n <- min..max, do: int_to_address(n)
+  end
+
+  # Convert an address in binary format to an integer.
+  defp address_to_int {oct4, oct3, oct2, oct1} do
+    (oct4 <<< 24) ||| (oct3 <<< 16) ||| (oct2 <<< 8) ||| oct1
+  end
+
+  # Convert an address in integer format to binary format.
+  defp int_to_address addr do
+    oct4 = addr >>> 24
+    oct3 = (addr >>> 16) &&& 0xff
+    oct2 = (addr >>> 8) &&& 0xff
+    oct1 = addr &&& 0xff
+    {oct4, oct3, oct2, oct1}
   end
 end

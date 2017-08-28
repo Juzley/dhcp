@@ -7,10 +7,12 @@ defmodule Dhcp.Server do
   @dhcp_server_port 67
   @dhcp_client_port 68
 
-  @empty_address_bytes <<0::32>>
-  @server_address_bytes <<192::8, 168::8, 0::8, 1::8>>
-  @gateway_address_bytes <<192::8, 168::8, 0::8, 1::8>>
-  @subnet_mask_bytes <<255::8, 255::8, 255::8, 0::8>>
+  @empty_address {0, 0, 0, 0}
+  @server_address {192, 168, 0, 1}
+  @gateway_address {192, 168, 0, 1}
+  @subnet_mask {255, 255, 255, 0}
+  @min_address {192, 168, 0, 1}
+  @max_address {192, 168, 0, 255}
 
   @broadcast_address_tuple {255, 255, 255, 255}
 
@@ -25,8 +27,10 @@ defmodule Dhcp.Server do
   def init(:ok) do
     {udp_res, udp_val} = @udp.open(@dhcp_server_port)
     {bind_res, binding_val} =
-      Dhcp.Binding.start(@server_address_bytes,
-                         @gateway_address_bytes)
+      Dhcp.Binding.start(@server_address,
+                         @gateway_address,
+                         @min_address,
+                         @max_address)
 
     case {udp_res, bind_res} do
       {:ok, :ok} ->
@@ -42,13 +46,13 @@ defmodule Dhcp.Server do
 
   # UDP packet callback.
   def handle_info({_, _socket}, state), do: {:noreply, state}
-  def handle_info({:udp, socket, ip, _port, data}, state) do
+  def handle_info({:udp, _socket, _ip, _port, data}, state) do
     case Dhcp.Packet.parse(data) do
       {:ok, packet} ->
         new_state = handle_packet(state, packet)
         {:noreply, new_state}
 
-      {:error, reason} ->
+      {:error, _} ->
         {:noreply, state}
     end
   end
@@ -80,16 +84,16 @@ defmodule Dhcp.Server do
     offer_packet = Dhcp.Packet.frame(%{
       op: 2,
       xid: packet.xid,
-      ciaddr: @empty_address_bytes,
+      ciaddr: @empty_address,
       yiaddr: offer_address,
-      siaddr: @server_address_bytes,
-      giaddr: @gateway_address_bytes,
+      siaddr: @server_address,
+      giaddr: @gateway_address,
       chaddr: packet.chaddr,
       options: %{
         53 => 2,
         1  => @subnet_mask,
         51 => 86400,
-        54 => @server_address_bytes
+        54 => @server_address
       }
     })
 
@@ -103,7 +107,8 @@ defmodule Dhcp.Server do
   end
 
   # Handle a request packet.
-  defp handle_request(state, packet) do
+  defp handle_request(state, _packet) do
+    state
   end
 
 end

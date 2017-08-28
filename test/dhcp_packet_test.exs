@@ -28,6 +28,14 @@ defmodule Dhcp.Test.Packet do
 
     test "parses a discover packet" do
       assert Dhcp.Packet.parse(@discover_packet) ==
-        {:ok, %Dhcp.Packet{op: 1, options: %{53 => 1}}}
+        {:ok, %Dhcp.Packet{op: 1, 
+                           xid: 15645,
+                           ciaddr: {0, 0, 0, 0},
+                           yiaddr: {0, 0, 0, 0},
+                           siaddr: {0, 0, 0, 0},
+                           giaddr: {0, 0, 0, 0},
+                           chaddr: {0, 11, 130, 1, 252, 66},
+                           options: %{53 => 1,
+                                      61 => {0, 11, 130, 1, 252, 66}}}}
     end
 end

@@ -1,23 +1,26 @@
 defmodule Dhcp.Test.Binding do
   use ExUnit.Case, async: false
 
-  @server_address <<192::8, 168::8, 0::8, 1::8>>
-  @gateway_address <<192::8, 168::8, 0::8, 2::8>>
-  @client_1 <<11::8, 22::8, 33::8, 44::8, 55::8, 66::8>>
-  @client_2 <<22::8, 33::8, 44::8, 55::8, 66::8, 77::8>>
+  @server_address {192, 168, 0, 2}
+  @gateway_address {192, 168, 0, 1}
+  @client_1 {11, 22, 33, 44, 55, 66}
+  @client_2 {22, 33, 44, 55, 66, 77}
 
   setup_all do
-    {:ok, pid} = Dhcp.Binding.start(@server_address, @gateway_address)
+    {:ok, pid} = Dhcp.Binding.start(@server_address,
+                                    @gateway_address,
+                                    {192, 168, 0, 1},
+                                    {192, 168, 0, 5})
     %{bindings: pid}
   end
 
   test "dhcp bindings", %{bindings: pid} do
     assert Dhcp.Binding.get_offer_address(pid, @client_1, nil) ==
-      {:ok, <<192::8, 168::8, 0::8, 3::8>>}
+      {:ok, {192, 168, 0, 3}}
     assert Dhcp.Binding.get_offer_address(pid, @client_1, nil) ==
-      {:ok, <<192::8, 168::8, 0::8, 3::8>>}
+      {:ok, {192, 168, 0, 3}}
     assert Dhcp.Binding.get_offer_address(pid, @client_2, nil) ==
-      {:ok, <<192::8, 168::8, 0::8, 4::8>>}
+      {:ok, {192, 168, 0, 4}}
   end
 end
 
