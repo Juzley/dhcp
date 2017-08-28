@@ -5,6 +5,8 @@ defmodule Dhcp.Binding do
 
   use GenServer
 
+  @timer Application.get_env(:dhcp, :timer_impl, :timer)
+
   # Client API
 
   @doc """
@@ -49,12 +51,19 @@ defmodule Dhcp.Binding do
   def handle_call({:offer, client_mac, client_req}, _from, state) do
     addr = offer_address(client_mac, client_req, state)
     bindings = Map.put(state.bindings, client_mac, {addr, :offered})
-    {:reply, {:ok, addr}, %{state | bindings: bindings }}
+    {:reply, {:ok, addr}, %{state | bindings: bindings}}
   end
 
   def handle_call({:allocate, client_mac, addr}, _from, state) do
     if address_available?(state, addr) do
-      bindings = Map.put(state.bindings, client_mac, {addr, :allocated})
+      {:ok, timer_ref} = @timer.apply_after(86400,
+                                            Dhcp.Binding,
+                                            &release_address/3,
+                                            [self(), client_mac, addr])
+      bindings = Map.put(state.bindings,
+                         client_mac,
+                         {addr, :allocated, timer_ref})
+
       {:reply, :ok, %{state | bindings: bindings}}
     else
       {:reply, {:error, :address_allocated}}
@@ -63,6 +72,7 @@ defmodule Dhcp.Binding do
 
   def handle_call({:release, client_mac, client_addr}, _from, state) do
     # TODO: Check that the address was actually allocated to the client
+    # TODO: Cancel timer
     bindings = Map.put(state.bindings, client_mac, {client_addr, :released})
     {:reply, :ok, %{state | bindings: bindings}}
   end
@@ -71,21 +81,24 @@ defmodule Dhcp.Binding do
     # TODO: Check the client req address is in the right subnet.
     binding = Map.fetch(state.bindings, client_mac)
     req_acceptable = client_req != nil and address_available?(state, client_req)
-    cond do
-      binding == :error and req_acceptable ->
-        client_req
+    case Map.fetch(state.bindings, client_mac) do
+      {:ok, {addr, class}} ->
+        cond do
+          class in [:allocated, :released] ->
+            addr
 
-      binding == :error ->
-        free_address(state)
+          req_acceptable ->
+            client_req
 
-      elem(binding, 1) in [:allocated, :released] ->
-        elem(binding, 0)
+          class == :offered ->
+            addr
 
-      req_acceptable ->
-        client_req
+          true ->
+            free_address(state)
+        end
 
-      true ->
-        free_address(state)
+      :error ->
+        if req_acceptable, do: client_req, else: free_address(state)
     end
   end
 
