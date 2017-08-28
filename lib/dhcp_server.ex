@@ -70,7 +70,7 @@ defmodule Dhcp.Server do
   end
 
   # Handle a discovery packet.
-  defp handle_discover(state, packet) do
+  def handle_discover(state, packet) do
     requested_address = Map.get(packet.options, 50)
 
     offer_address = Dhcp.Binding.get_offer_address(state.bindings,

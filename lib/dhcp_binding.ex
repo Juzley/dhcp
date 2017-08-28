@@ -1,14 +1,40 @@
 defmodule Dhcp.Binding do
+  @moduledoc """
+    This module implements a GenServer which manages DHCP address bindings.
+  """
+
   use GenServer
 
   # Client API
 
+  @doc """
+  Starts the GenServer.
+  """
   def start(server_address, gateway_address) do
     GenServer.start_link(__MODULE__, {server_address, gateway_address})
   end
 
-  def get_offer_address(pid, client_mac, client_req) do
+  @doc """
+  Get an address to offer to client with MAC `client_mac`, optionally
+  considering an address requested by the client.
+  """
+  def get_offer_address(pid, client_mac, client_req \\ nil) do
     GenServer.call(pid, {:offer, client_mac, client_req})
+  end
+
+  @doc """
+  Allocate an address to a client with MAC `client_mac`, if the address is
+  not already allocated.
+
+  Returns `:ok` if the address was allocated or {`:error`, `:address_allocated}
+  if the address was already allocated.
+  """
+  def allocate_address(pid, client_mac, client_addr) do
+    GenServer.call(pid, {:allocate, client_mac, client_addr})
+  end
+
+  def release_address(pid, client_mac, client_addr) do
+    GenServer.call(pid, {:release, client_mac, client_addr})
   end
 
 
@@ -17,85 +43,86 @@ defmodule Dhcp.Binding do
   def init({server_address, gateway_address}) do
     {:ok, %{server_address: server_address,
             gateway_address: gateway_address,
-            bindings: %{},
-            expired: %{},
-            offered: MapSet.new()}}
+            bindings: %{}}}
   end
 
   def handle_call({:offer, client_mac, client_req}, _from, state) do
     addr = offer_address(client_mac, client_req, state)
-    offered = MapSet.put(state.offered, addr)
-    {:reply, addr, %{state | offered: offered }}
+    bindings = Map.put(state.bindings, client_mac, {addr, :offered})
+    {:reply, {:ok, addr}, %{state | bindings: bindings }}
+  end
+
+  def handle_call({:allocate, client_mac, addr}, _from, state) do
+    if address_available?(state, addr) do
+      bindings = Map.put(state.bindings, client_mac, {addr, :allocated})
+      {:reply, :ok, %{state | bindings: bindings}}
+    else
+      {:reply, {:error, :address_allocated}}
+    end
+  end
+
+  def handle_call({:release, client_mac, client_addr}, _from, state) do
+    # TODO: Check that the address was actually allocated to the client
+    bindings = Map.put(state.bindings, client_mac, {client_addr, :released})
+    {:reply, :ok, %{state | bindings: bindings}}
   end
 
   defp offer_address(client_mac, client_req, state) do
-    offer_address_check_bound(client_mac, state)
-    |> offer_address_check_expired(client_mac, state)
-    |> offer_address_check_requested(client_req, state)
-    |> offer_address_check_free(state)
-  end
+    # TODO: Check the client req address is in the right subnet.
+    binding = Map.fetch(state.bindings, client_mac)
+    req_acceptable = client_req != nil and address_available?(state, client_req)
+    cond do
+      binding == :error and req_acceptable ->
+        client_req
 
-  defp offer_address_check_bound(client_mac, state) do
-    Map.get(state.bindings, client_mac)
-  end
+      binding == :error ->
+        free_address(state)
 
-  defp offer_address_check_expired(nil, client_mac, state) do
-    if addr = Map.get(state.expired, client_mac) do
-      if address_available?(state, addr), do: addr, else: nil
-    else
-      nil
+      elem(binding, 1) in [:allocated, :released] ->
+        elem(binding, 0)
+
+      req_acceptable ->
+        client_req
+
+      true ->
+        free_address(state)
     end
-  end
-
-  defp offer_address_check_expired(offer_addr, _client_mac, _state) do
-    offer_addr
-  end
-
-  defp offer_address_check_requested(nil, state, nil), do: nil
-
-  defp offer_address_check_requested(nil, client_req, state) do
-    if address_available?(state, client_req) do
-      client_req
-    else
-      nil
-    end
-  end
-
-  defp offer_address_check_requested(offer_addr, _client_req, _state) do
-    offer_addr
-  end
-
-  defp offer_address_check_free(nil, state) do
-    free_address(state)
-  end
-
-  defp offer_address_check_free(offer_addr, _state) do
-    offer_addr
-  end
-
-  # Get a MapSet of currently bound addresses.
-  defp bound_addresses(state) do
-    MapSet.new(Map.values(state.bindings))
   end
 
   # Find a free address - prefer addresses that haven't already been offered.
   defp free_address(state) do
-    address_pool
+    address_pool()
     |> Enum.filter(&(address_available?(state, &1)))
-    |> Enum.sort_by(&(if MapSet.member?(state.offered, &1), do: 1, else: 0))
+    |> Enum.sort_by(&(if address_offered?(state, &1), do: 0, else: 1))
     |> List.first
   end
 
   # Determine whether a given address is available
-  def address_available?(state, addr) do
+  defp address_available?(state, addr) do
     not MapSet.member?(unavailable_addresses(state), addr)
   end
 
+  defp address_offered?(state, addr) do
+    not MapSet.member?(offered_addresses(state), addr)
+  end
+
   # Get a MapSet of currently unavailable addresses.
-  def unavailable_addresses(state) do
-    MapSet.new(Map.values(state.bindings))
+  defp unavailable_addresses(state) do
+    state
+    |> allocated_addresses
     |> MapSet.put(state.server_address)
     |> MapSet.put(state.gateway_address)
+  end
+
+  defp allocated_addresses(state), do: get_addresses(state, :allocated)
+
+  defp offered_addresses(state), do: get_addresses(state, :offered)
+
+  defp get_addresses(state, class) do
+    Map.values(state.bindings)
+    |> Enum.filter(fn({_, c}) -> c == class end)
+    |> Enum.map(fn({a, _}) -> a end)
+    |> MapSet.new()
   end
 
   # Get the current full address pool for the subnet.

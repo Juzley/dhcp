@@ -12,11 +12,11 @@ defmodule Dhcp.Test.Binding do
 
   test "offers a free address", %{bindings: pid} do
     assert Dhcp.Binding.get_offer_address(pid, @client_mac, nil) ==
-      <<192::8, 168::8, 0::8, 3::8>>
+      {:ok, <<192::8, 168::8, 0::8, 3::8>>}
   end
 
   test "offers an address that hasn't been offered", %{bindings: pid} do
     assert Dhcp.Binding.get_offer_address(pid, @client_mac, nil) ==
-      <<192::8, 168::8, 0::8, 4::8>>
+      {:ok, <<192::8, 168::8, 0::8, 4::8>>}
   end
 end
