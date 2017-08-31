@@ -1,5 +1,5 @@
 defmodule Dhcp.Test.Binding do
-  use ExUnit.Case, async: false
+  use ExUnit.Case
 
   @server_address {192, 168, 0, 2}
   @gateway_address {192, 168, 0, 1}

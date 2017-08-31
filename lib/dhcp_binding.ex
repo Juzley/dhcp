@@ -50,11 +50,11 @@ defmodule Dhcp.Binding do
   @doc """
   Release the address bound to a client.
 
-  Returns `:ok` in all cases.
+  Returns `:ok` in the address was released, or
+  {`:error`, `:address_not_allocated`} if the address wasn't allocated to the
+  client.
   """
   def release_address(pid, client_mac, client_addr) do
-    # TODO: Do we actually need to pass the client addr?
-    # TODO: COuld this be a cast rather than a call?
     GenServer.call(pid, {:release, client_mac, client_addr})
   end
 
@@ -77,7 +77,7 @@ defmodule Dhcp.Binding do
         {:reply, {:error, :no_addresses}, state}
 
       addr ->
-        bindings = Map.put(state.bindings, client_mac, {addr, :offered, 0})
+        bindings = Map.put(state.bindings, client_mac, {addr, :offered, nil})
         {:reply, {:ok, addr}, %{state | bindings: bindings}}
     end
   end
@@ -95,16 +95,26 @@ defmodule Dhcp.Binding do
 
       {:reply, :ok, %{state | bindings: bindings}}
     else
-      {:reply, {:error, :address_allocated}}
+      {:reply, {:error, :address_not_allocated}}
     end
   end
 
   # Handle a 'release' call.
   def handle_call({:release, client_mac, client_addr}, _from, state) do
-    # TODO: Check that the address was actually allocated to the client
-    # TODO: Cancel timer
-    bindings = Map.put(state.bindings, client_mac, {client_addr, :released, 0})
-    {:reply, :ok, %{state | bindings: bindings}}
+    case Map.fetch(state.bindings, client_mac) do
+      {^client_addr, :allocated, timer_ref} ->
+        @timer.cancel(timer_ref)
+        bindings = Map.put(state.bindings,
+                           client_mac,
+                           {client_addr, :released, nil})
+
+        {:reply, :ok, %{state | bindings: bindings}}
+
+      _ ->
+        # 
+        {:reply, {:error, :not_allocated}, state}
+
+    end
   end
 
   # Determine the address to respond to an offer request with.
@@ -142,7 +152,6 @@ defmodule Dhcp.Binding do
 
   # Find a free address - prefer addresses that haven't already been offered.
   defp free_address(state) do
-    # TODO: Handle running out of addresses.
     state
     |> address_pool()
     |> Enum.filter(&(address_available?(state, &1)))
@@ -152,8 +161,8 @@ defmodule Dhcp.Binding do
 
   # Determine whether a given address is available
   defp address_available?(state, addr) do
-    # TODO: Check whether the address is in the pool also.
-    not MapSet.member?(unavailable_addresses(state), addr)
+    Enum.member?(address_pool(state), addr) and not
+      MapSet.member?(unavailable_addresses(state), addr)
   end
 
   defp address_offered?(state, addr) do

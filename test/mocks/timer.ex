@@ -5,4 +5,11 @@ defmodule Dhcp.Test.Timer do
 
     {:ok, 0}
   end
+
+  def cancel timer_ref do
+    [{_, parent}] = :ets.lookup(:parent_pid, self())
+    send(parent, {timer_ref})
+
+    {:ok, :cancel}
+  end
 end
