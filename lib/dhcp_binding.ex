@@ -2,6 +2,8 @@ defmodule Dhcp.Binding do
   @moduledoc """
     This module implements a GenServer which manages DHCP address bindings.
   """
+  
+  # TODO: Lease times
 
   use GenServer
   use Bitwise
@@ -30,7 +32,7 @@ defmodule Dhcp.Binding do
   considering an address requested by the client.
 
   Returns {`:ok`, address} with the address to offer if successful, or
-  {`:error`, `:no_addresses`} if there are no free addresses left in the pool.
+  {`:
   """
   def get_offer_address(pid, client_mac, client_req \\ nil) do
     GenServer.call(pid, {:offer, client_mac, client_req})
@@ -95,14 +97,14 @@ defmodule Dhcp.Binding do
 
       {:reply, :ok, %{state | bindings: bindings}}
     else
-      {:reply, {:error, :address_not_allocated}}
+      {:reply, {:error, :address_allocated}, state}
     end
   end
 
   # Handle a 'release' call.
   def handle_call({:release, client_mac, client_addr}, _from, state) do
     case Map.fetch(state.bindings, client_mac) do
-      {^client_addr, :allocated, timer_ref} ->
+      {:ok, {^client_addr, :allocated, timer_ref}} ->
         @timer.cancel(timer_ref)
         bindings = Map.put(state.bindings,
                            client_mac,
@@ -111,8 +113,7 @@ defmodule Dhcp.Binding do
         {:reply, :ok, %{state | bindings: bindings}}
 
       _ ->
-        # 
-        {:reply, {:error, :not_allocated}, state}
+        {:reply, {:error, :address_not_allocated}, state}
 
     end
   end
@@ -140,9 +141,6 @@ defmodule Dhcp.Binding do
 
           class == :offered ->
             addr
-
-          true ->
-            free_address(state)
         end
 
       :error ->
@@ -159,12 +157,13 @@ defmodule Dhcp.Binding do
     |> List.first
   end
 
-  # Determine whether a given address is available
+  # Determine whether a given address is available.
   defp address_available?(state, addr) do
     Enum.member?(address_pool(state), addr) and not
       MapSet.member?(unavailable_addresses(state), addr)
   end
 
+  # Determine whether a given address has been offered.
   defp address_offered?(state, addr) do
     not MapSet.member?(offered_addresses(state), addr)
   end
