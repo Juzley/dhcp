@@ -126,14 +126,14 @@ defmodule Dhcp.Server do
       3 ->
         handle_request(state, packet)
 
-	  7 ->
-		handle_release(state, packet)
+      7 ->
+        handle_release(state, packet)
+
+      :no_type ->
+        Logger.debug "Ignoring DHCP message received with no message type"
 
       msg_type ->
         Logger.debug "Ignoring DHCP message type #{msg_type}"
-
-	  :no_type ->
- 		Logger.debug "Ignoring DHCP message received with no message type"
     end
 
     state
@@ -174,33 +174,33 @@ defmodule Dhcp.Server do
 
   # Handle a release packet.
   defp handle_release(state, packet) do
-	Binding.release_address(state.bindings,
-							packet.chaddr,
-							packet.ciaddr)
+    Binding.release_address(state.bindings,
+                            packet.chaddr,
+                            packet.ciaddr)
   end
 
   # Frame a DHCPOFFER
   defp frame_offer(req_packet, offer_addr, state) do
-	Packet.frame(
-	  state.src_mac,
-	  req_packet.chaddr,
-	  @server_address,
-	  offer_addr,
-	  %{ op: 2,
-		 xid: req_packet.xid,
-		 ciaddr: @empty_address,
-		 yiaddr: offer_addr,
-		 siaddr: @server_address,
-		 giaddr: req_packet.giaddr,
-		 chaddr: req_packet.chaddr,
-		 options: %{ 53 => 2,
-					 1  => @subnet_mask,
-					 3  => [@gateway_address],
-					 6  => [@dns_address],
-					 51 => 86400,
-					 54 => @server_address
-		 }
-	  })
+    Packet.frame(
+      state.src_mac,
+      req_packet.chaddr,
+      @server_address,
+      offer_addr,
+      %{ op: 2,
+         xid: req_packet.xid,
+         ciaddr: @empty_address,
+         yiaddr: offer_addr,
+         siaddr: @server_address,
+         giaddr: req_packet.giaddr,
+         chaddr: req_packet.chaddr,
+         options: %{ 53 => 2,
+                     1  => @subnet_mask,
+                     3  => [@gateway_address],
+                     6  => [@dns_address],
+                     51 => 86400,
+                     54 => @server_address
+                   }
+      })
     end
 
   # Frame a DHCPACK
@@ -219,8 +219,8 @@ defmodule Dhcp.Server do
          chaddr: req_packet.chaddr,
          options: %{ 53 => 5,
                      1  => @subnet_mask,
-					 3  => [@gateway_address],
-					 6  => [@dns_address],
+                     3  => [@gateway_address],
+                     6  => [@dns_address],
                      51 => 86400,
                      54 => @server_address
          }
