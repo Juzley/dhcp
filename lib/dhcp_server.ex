@@ -2,6 +2,7 @@ defmodule Dhcp.Server do
   use GenServer
   require Logger
 
+  import Dhcp.Util
   alias Dhcp.Binding
   alias Dhcp.Packet
 
@@ -132,7 +133,7 @@ defmodule Dhcp.Server do
         handle_release(state, packet)
 
       :no_type ->
-        Logger.debug "Ignoring DHCP message received with no message type"
+        Logger.error "Ignoring DHCP message received with no message type"
 
       msg_type ->
         Logger.debug "Ignoring DHCP message type #{msg_type}"
@@ -144,41 +145,82 @@ defmodule Dhcp.Server do
   # Handle a discovery packet.
   def handle_discover(state, packet) do
     requested_address = Map.get(packet.options, 50)
+    Logger.info(
+      "Received Discover message from #{mac_to_string(packet.chaddr)}," <>
+      " requested address  #{ipv4_to_string(requested_address)}")
+
     offer_info = Binding.get_offer_address(state.bindings,
                                            packet.chaddr,
                                            requested_address)
     case offer_info do
       {:ok, offer_address} ->
+        Logger.info(
+          "Offering #{ipv4_to_string(offer_address)} to" <>
+          " #{mac_to_string(packet.chaddr)}")
         frame_offer(packet, offer_address, state) |> send_response(state)
-	end
 
-    state
+      {:error, reason} ->
+        Logger.error(
+          "Failed to get offer address for #{mac_to_string(packet.chaddr)}:" <>
+          " #{reason}")
+	end
   end
 
   # Handle a request packet.
   defp handle_request(state, packet) do
     requested_address = Map.get(packet.options, 50)
+    server_address = Map.get(packet.options, 54)
+
+    Logger.info(
+      "Received Request message from #{mac_to_string(packet.chaddr)}" <>
+      " to #{ipv4_to_string(server_address)}, requested address" <>
+      " #{ipv4_to_string(requested_address)}")
 
     # TODO: Forget the offer if this request isn't for us.
-    if packet.siaddr == @server_address do
+    if server_address == @server_address do
       result = Binding.allocate_address(state.bindings,
                                         packet.chaddr,
                                         requested_address)
-      if result == :ok do
+      case result do
+        :ok ->
+          Logger.info(
+            "Allocated #{ipv4_to_string(requested_address)} to" <>
+            " #{mac_to_string(packet.chaddr)}, sending Ack")
         frame_ack(packet, requested_address, state) |> send_response(state)
-      else
+
+        {:error, reason} ->
+          Logger.error(
+            "Failed to allocate #{ipv4_to_string(requested_address)} to" <>
+            " #{mac_to_string(packet.chaddr)}: #{reason}, sending Nak")
         frame_nak(packet, requested_address, state) |> send_response(state)
       end
     end
-
-    state
   end
 
   # Handle a release packet.
   defp handle_release(state, packet) do
-    Binding.release_address(state.bindings,
-                            packet.chaddr,
-                            packet.ciaddr)
+    server_address = Map.get(packet.options, 54)
+    Logger.info(
+      "Received Release message from #{mac_to_string(packet.chaddr)} to" <>
+      " #{ipv4_to_string(server_address)}, released address" <>
+      " #{ipv4_to_string(packet.ciaddr)}")
+
+    if server_address == @server_address do
+      result = Binding.release_address(state.bindings,
+                                       packet.chaddr,
+                                       packet.ciaddr)
+      case result do
+        :ok ->
+          Logger.info(
+            "Released #{ipv4_to_string(packet.ciaddr)} from" <>
+            " #{mac_to_string(packet.chaddr)}")
+
+        {:error, reason} ->
+          Logger.error(
+            "Failed to release #{ipv4_to_string(packet.ciaddr)} from" <>
+            " #{mac_to_string(packet.chaddr)}: #{reason}")
+        end
+    end
   end
 
   # Frame a DHCPOFFER
