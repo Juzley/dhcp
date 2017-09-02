@@ -93,7 +93,7 @@ defmodule Dhcp.Packet do
 
   # Stick a UDP header on the front of a packet.
   defp frame_udpip(payload, src_addr, dst_addr) do
-    udp_len = byte_size(payload) + 16
+    udp_len = byte_size(payload) + 8
     ipv4_len = udp_len + 20
     ipv4_info = ipv4(saddr: src_addr, daddr: dst_addr, len: ipv4_len, p: 17)
     udp_info = udp(sport: 67, dport: 68, ulen: udp_len)
