@@ -4,6 +4,7 @@ defmodule Dhcp.Binding do
   """
   
   # TODO: Lease times - or maybe handle in the server?
+  # TODO: Persist bindings to disk for restart.
 
   use GenServer
   use Bitwise

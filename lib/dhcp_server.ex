@@ -8,20 +8,19 @@ defmodule Dhcp.Server do
   @udp Application.get_env(:dhcp, :udp_impl, :gen_udp)
 
   @dhcp_server_port 67
-  @dhcp_client_port 68
-
   @empty_address {0, 0, 0, 0}
-  @server_address {192, 168, 0, 1}
-  @gateway_address {192, 168, 0, 1}
-  @dns_address {192, 168, 0, 1}
-  @subnet_mask {255, 255, 255, 0}
-  @min_address {192, 168, 0, 1}
-  @max_address {192, 168, 0, 255}
-
   @broadcast_address {255, 255, 255, 255}
 
+  @server_address Application.fetch_env!(:dhcp, :server_address)
+  @gateway_address Application.fetch_env!(:dhcp, :gateway_address)
+  @dns_address Application.fetch_env!(:dhcp, :dns_address)
+  @subnet_mask Application.fetch_env!(:dhcp, :subnet_mask)
+  @min_address Application.fetch_env!(:dhcp, :min_address)
+  @max_address Application.fetch_env!(:dhcp, :max_address)
+
+
   # TODO: Broadcast bit handling
-  # TODO: gateway address handling (next server rather than giaddr?)
+  # TODO: DHCPInform
 
   # Client API
 
@@ -220,7 +219,7 @@ defmodule Dhcp.Server do
         xid: req_packet.xid,
         ciaddr: @empty_address,
         yiaddr: req_addr,
-        siaddr: @server_address, # Should this be the next-hop addr?
+        siaddr: @server_address,
         giaddr: req_packet.giaddr,
         chaddr: req_packet.chaddr,
         options: %{ 53 => 5,
