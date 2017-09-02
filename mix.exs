@@ -24,6 +24,9 @@ defmodule Dhcp.Mixfile do
 
   # Run "mix help deps" to learn about dependencies.
   defp deps do
-    []
+    [
+      {:pkt, github: "msantos/pkt", tag: "0.4.4"},
+      {:procket, github: "msantos/procket", tag: "0.8.0"}
+    ]
   end
 end

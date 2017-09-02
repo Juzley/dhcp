@@ -1,10 +1,19 @@
 defmodule Dhcp.Packet do
+  require Record
+
   defstruct [
-    :op, :xid, :ciaddr, :yiaddr, :siaddr, :giaddr, :chaddr, options: %{}]
+    op: 0, xid: 0, ciaddr: {0, 0, 0, 0}, yiaddr: {0, 0, 0, 0},
+    siaddr: {0, 0, 0, 0}, giaddr: {0, 0, 0, 0}, chaddr: {0, 0, 0, 0, 0, 0},
+    options: %{}]
+
+  Record.defrecord :ipv4, Record.extract(
+    :ipv4, from: "deps/pkt/include/pkt.hrl")
+  Record.defrecord :udp, Record.extract(
+    :udp, from: "deps/pkt/include/pkt.hrl")
 
   @cookie 0x63825363
 
-  def frame(packet) do
+  def frame(src_mac, dst_mac, src_ip, dst_ip, packet) do
     options = frame_options(packet.options)
     ciaddr = ipv4_tuple_to_binary(packet.ciaddr)
     yiaddr = ipv4_tuple_to_binary(packet.yiaddr)
@@ -30,6 +39,8 @@ defmodule Dhcp.Packet do
       @cookie    :: big-unsigned-size(32), # DHCP magic cookie
       options    :: binary,
       255        :: size(8)>>
+    |> frame_udpip(src_ip, dst_ip)
+    |> frame_ether(src_mac, dst_mac)
   end
 
   defp frame_options(options) do
@@ -47,6 +58,21 @@ defmodule Dhcp.Packet do
 
   defp frame_option({option, val}) when option in [51, 58, 59] do
     <<option :: 8, 4 :: 8, val :: big-unsigned-size(32)>>
+  end
+
+  defp frame_ether(payload, src_mac, dst_mac) do
+    mac_tuple_to_binary(dst_mac) <> mac_tuple_to_binary(src_mac) <>
+      <<0x0800::16>> <> payload
+  end
+
+  defp frame_udpip(payload, src_addr, dst_addr) do
+    udp_len = byte_size(payload) + 16
+    ipv4_len = udp_len + 20
+    ipv4_info = ipv4(saddr: src_addr, daddr: dst_addr, len: ipv4_len, p: 17)
+    udp_info = udp(sport: 67, dport: 68, ulen: udp_len)
+    ipv4_sum = :pkt.makesum([ipv4_info, udp_info, payload])
+
+    :pkt.ipv4(ipv4(ipv4_info, sum: ipv4_sum)) <> :pkt.udp(udp_info) <> payload 
   end
 
   def parse(data) do
