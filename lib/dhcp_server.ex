@@ -2,6 +2,9 @@ defmodule Dhcp.Server do
   use GenServer
   require Logger
 
+  alias Dhcp.Binding
+  alias Dhcp.Packet
+
   @udp Application.get_env(:dhcp, :udp_impl, :gen_udp)
 
   @dhcp_server_port 67
@@ -15,6 +18,9 @@ defmodule Dhcp.Server do
   @max_address {192, 168, 0, 255}
 
   @broadcast_address_tuple {255, 255, 255, 255}
+
+  # TODO: Broadcast bit handling
+  # TODO: gateway address handling (next server rather than giaddr?)
 
   # Client API
 
@@ -40,6 +46,7 @@ defmodule Dhcp.Server do
     end
   end
 
+  # Initialize the receive socket.
   defp init_rx_socket({:ok, state}) do
     case result = @udp.open(@dhcp_server_port) do
       {:ok, socket} ->
@@ -51,6 +58,7 @@ defmodule Dhcp.Server do
   end
   defp init_rx_socket(err), do: err
 
+  # Initialize the send socket.
   defp init_tx_socket({:ok, state}) do
     case result = :packet.socket(0x800) do
       {:ok, socket} ->
@@ -64,6 +72,7 @@ defmodule Dhcp.Server do
   end
   defp init_tx_socket(err), do: err
 
+  # Get the MAC address for the interface we're going to send on.
   defp init_src_mac({:ok, state}) do
     mac_info =
       :packet.default_interface()
@@ -80,8 +89,9 @@ defmodule Dhcp.Server do
   end
   defp init_src_mac(err), do: err
 
+  # Initialize the binding server.
   defp init_binding({:ok, state}) do
-    result = Dhcp.Binding.start(@server_address, @gateway_address,
+    result = Binding.start(@server_address, @gateway_address,
                                 @min_address, @max_address)
     case result do
       {:ok, bindings} ->
@@ -96,7 +106,7 @@ defmodule Dhcp.Server do
   # UDP packet callback.
   def handle_info({_, _socket}, state), do: {:noreply, state}
   def handle_info({:udp, _socket, _ip, _port, data}, state) do
-    case Dhcp.Packet.parse(data) do
+    case Packet.parse(data) do
       {:ok, packet} ->
         new_state = handle_packet(state, packet)
         {:noreply, new_state}
@@ -115,6 +125,9 @@ defmodule Dhcp.Server do
       3 ->
         handle_request(state, packet)
 
+	  7 ->
+		handle_release(state, packet)
+
       msg_type ->
         Logger.debug "Ignoring DHCP message type #{msg_type}"
     end
@@ -125,39 +138,109 @@ defmodule Dhcp.Server do
   # Handle a discovery packet.
   def handle_discover(state, packet) do
     requested_address = Map.get(packet.options, 50)
-    offer_address = Dhcp.Binding.get_offer_address(state.bindings,
-                                                   packet.chaddr,
-                                                   requested_address)
-    offer_packet = Dhcp.Packet.frame(%{
-      op: 2,
-      xid: packet.xid,
-      ciaddr: @empty_address,
-      yiaddr: offer_address,
-      siaddr: @server_address,
-      giaddr: @gateway_address,
-      chaddr: packet.chaddr,
-      options: %{
-        53 => 2,
-        1  => @subnet_mask,
-        51 => 86400,
-        54 => @server_address
-      }
-    })
-
-    # TODO: unicast replies if the client has indicated a preference?
-    @udp.send(state.socket,
-              @broadcast_address_tuple,
-              @dhcp_client_port,
-              Dhcp.Packet.frame(offer_packet))
+    offer_info = Binding.get_offer_address(state.bindings,
+                                           packet.chaddr,
+                                           requested_address)
+    case offer_info do
+      {:ok, offer_address} ->
+        frame_offer(packet, offer_address, state) |> send_response(state)
+	end
 
     state
   end
 
   # Handle a request packet.
-  defp handle_request(state, _packet) do
+  defp handle_request(state, packet) do
+    requested_address = Map.get(packet.options, 50)
+
+    # TODO: Forget the offer if this request isn't for us.
+    if packet.siaddr == @server_address do
+      result = Binding.allocate_address(state.bindings,
+                                        packet.chaddr,
+                                        requested_address)
+      if result == :ok do
+        frame_ack(packet, requested_address, state) |> send_response(state)
+      else
+        frame_nak(packet, requested_address, state) |> send_response(state)
+      end
+    end
+
     state
   end
 
-  defp send_response do
+  # Handle a release packet.
+  defp handle_release(state, packet) do
+	Binding.release_address(state.bindings,
+							packet.chaddr,
+							packet.ciaddr)
+  end
+
+  # Frame a DHCPOFFER
+  defp frame_offer(req_packet, offer_addr, state) do
+	Packet.frame(
+	  state.src_mac,
+	  req_packet.chaddr,
+	  @server_address,
+	  offer_addr,
+	  %{ op: 2,
+		 xid: req_packet.xid,
+		 ciaddr: @empty_address,
+		 yiaddr: offer_addr,
+		 siaddr: @server_address,
+		 giaddr: req_packet.giaddr,
+		 chaddr: req_packet.chaddr,
+		 options: %{ 53 => 2,
+					 1  => @subnet_mask,
+					 51 => 86400,
+					 54 => @server_address
+		 }
+	  })
+    end
+
+  # Frame a DHCPACK
+  defp frame_ack(req_packet, req_addr, state) do
+    Packet.frame(
+      state.src_mac,
+      req_packet.chaddr,
+      @server_address,
+      req_addr,
+      %{ op: 2,
+         xid: req_packet.xid,
+         ciaddr: @empty_address,
+         yiaddr: req_addr,
+         siaddr: @server_address, # Should this be the next-hop addr?
+         giaddr: req_packet.giaddr,
+         chaddr: req_packet.chaddr,
+         options: %{ 53 => 5,
+                     1  => @subnet_mask,
+                     51 => 86400,
+                     54 => @server_address
+         }
+      })
+  end
+
+  # Frame a DHCPNAK
+  defp frame_nak(req_packet, req_addr, state) do
+    Packet.frame(
+      state.src_mac,
+      req_packet.chaddr,
+      @server_address,
+      req_addr,
+      %{ op: 2,
+         xid: req_packet.xid,
+         ciaddr: @empty_address,
+         yiaddr: @empty_address,
+         siaddr: @empty_address,
+         giaddr: @empty_address,
+         chaddr: req_packet.chaddr,
+         options: %{ 53 => 6,
+                     54 => @server_address
+         }
+      })
+  end
+
+  # Send a framed response to a client.
+  defp send_response(packet, state) do
+    :ok = :packet.send(state.tx_socket, state.ifaddr, packet)
   end
 end

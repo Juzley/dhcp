@@ -1,10 +1,11 @@
 defmodule Dhcp.Packet do
   require Record
+  use Bitwise
 
   defstruct [
     op: 0, xid: 0, ciaddr: {0, 0, 0, 0}, yiaddr: {0, 0, 0, 0},
     siaddr: {0, 0, 0, 0}, giaddr: {0, 0, 0, 0}, chaddr: {0, 0, 0, 0, 0, 0},
-    options: %{}]
+    broadcast_flag: false, options: %{}]
 
   Record.defrecord :ipv4, Record.extract(
     :ipv4, from: "deps/pkt/include/pkt.hrl")
@@ -20,6 +21,7 @@ defmodule Dhcp.Packet do
     siaddr = ipv4_tuple_to_binary(packet.siaddr)
     giaddr = ipv4_tuple_to_binary(packet.giaddr)
     chaddr = mac_tuple_to_binary(packet.chaddr)
+    flags = if packet.broadcast_flag, do: 1 <<< 15, else: 0
 
     <<packet.op  :: size(8),
       1          :: size(8),               # Hardware type, Ethernet
@@ -27,7 +29,7 @@ defmodule Dhcp.Packet do
       0          :: size(8),               # Hops
       packet.xid :: big-unsigned-size(32),
       0          :: size(8),               # Seconds
-      0          :: size(16),              # Flags
+      flags      :: size(16),              # Flags
       ciaddr     :: bitstring-size(32),
       yiaddr     :: bitstring-size(32),
       siaddr     :: bitstring-size(32),
@@ -86,7 +88,8 @@ defmodule Dhcp.Packet do
         _hops           :: size(8),
         xid             :: big-unsigned-size(32), # Transaction ID
         _secs           :: big-unsigned-size(16),
-        flags           :: bitstring-size(16),
+        broadcast       :: big-unsigned-size(1),
+        _flgs           :: bitstring-size(15),
         ciaddr          :: bitstring-size(32),
         yiaddr          :: bitstring-size(32),
         siaddr          :: bitstring-size(32),
@@ -107,6 +110,7 @@ defmodule Dhcp.Packet do
           siaddr: ipv4_binary_to_tuple(siaddr),
           giaddr: ipv4_binary_to_tuple(giaddr),
           chaddr: mac_binary_to_tuple(chaddr),
+          broadcast_flag: broadcast == 1,
           options: options} 
 
         {:ok, packet}
@@ -117,7 +121,7 @@ defmodule Dhcp.Packet do
   end
 
   # End of packet
-  defp parse_options(<<255::8, remainder::binary>>, options), do: options
+  defp parse_options(<<255::8, _remainder::binary>>, options), do: options
 
   # Skip padding bytes
   defp parse_options(<<0::8, remainder::binary>>, options) do
@@ -140,8 +144,8 @@ defmodule Dhcp.Packet do
   end
 
   # Skip other option types that we don't support
-  defp parse_options(<<option::8, len::8, remainder::binary>>, options) do
-    <<value :: binary-size(len), new_remainder :: binary>> = remainder
+  defp parse_options(<<_option::8, len::8, remainder::binary>>, options) do
+    <<_value :: binary-size(len), new_remainder :: binary>> = remainder
     parse_options(new_remainder, options)
   end
 
