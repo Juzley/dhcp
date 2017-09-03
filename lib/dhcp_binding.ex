@@ -3,7 +3,7 @@ defmodule Dhcp.Binding do
     This module implements a GenServer which manages DHCP address bindings.
   """
   
-  # TODO: Lease times
+  # TODO: Lease times - or maybe handle in the server?
 
   use GenServer
   use Bitwise
@@ -121,7 +121,8 @@ defmodule Dhcp.Binding do
   # Determine the address to respond to an offer request with.
   defp offer_address(client_mac, client_req, state) do
     req_acceptable =
-      client_req != nil and address_available?(state, client_req)
+      client_req != nil and client_req != {0, 0, 0, 0} and
+      address_available?(state, client_req)
 
     # From the RFC, consider addresses to offer in the following order:
     # 1. The address that is currently bound to the client.

@@ -13,6 +13,7 @@ defmodule Dhcp.Server do
   @empty_address {0, 0, 0, 0}
   @server_address {192, 168, 0, 1}
   @gateway_address {192, 168, 0, 1}
+  @dns_address {192, 168, 0, 1}
   @subnet_mask {255, 255, 255, 0}
   @min_address {192, 168, 0, 1}
   @max_address {192, 168, 0, 255}
@@ -118,7 +119,7 @@ defmodule Dhcp.Server do
 
   # Handle a successfully parsed DHCP packet.
   defp handle_packet(state, packet) do
-    case Map.get(packet.options, 53) do
+    case Map.get(packet.options, 53, :no_type) do
       1 ->
         handle_discover(state, packet)
 
@@ -130,6 +131,9 @@ defmodule Dhcp.Server do
 
       msg_type ->
         Logger.debug "Ignoring DHCP message type #{msg_type}"
+
+	  :no_type ->
+ 		Logger.debug "Ignoring DHCP message received with no message type"
     end
 
     state
@@ -191,6 +195,8 @@ defmodule Dhcp.Server do
 		 chaddr: req_packet.chaddr,
 		 options: %{ 53 => 2,
 					 1  => @subnet_mask,
+					 3  => [@gateway_address],
+					 6  => [@dns_address],
 					 51 => 86400,
 					 54 => @server_address
 		 }
@@ -213,6 +219,8 @@ defmodule Dhcp.Server do
          chaddr: req_packet.chaddr,
          options: %{ 53 => 5,
                      1  => @subnet_mask,
+					 3  => [@gateway_address],
+					 6  => [@dns_address],
                      51 => 86400,
                      54 => @server_address
          }
