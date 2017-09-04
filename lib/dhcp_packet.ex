@@ -36,7 +36,7 @@ defmodule Dhcp.Packet do
       6          :: size(8),               # MAC address length
       0          :: size(8),               # Hops
       packet.xid :: big-unsigned-size(32),
-      0          :: size(8),               # Seconds
+      0          :: size(16),              # Seconds
       flags      :: size(16),              # Flags
       ciaddr     :: bitstring-size(32),
       yiaddr     :: bitstring-size(32),
@@ -166,6 +166,11 @@ defmodule Dhcp.Packet do
     {:ok, packet}
   end
 
+  # The packet isn't a valid DHCP packet, return an error.
+  def parse(_) do
+    {:error, :bad_packet}
+  end
+
   # End of packet
   defp parse_options(<<255::8, _remainder::binary>>, options), do: options
 
@@ -190,8 +195,9 @@ defmodule Dhcp.Packet do
   end
 
   # Values represented by a single IPv4 addr.
-  defp parse_options(<<option::8, 4::8, addr::bitstring-size(32),
-                       remainder::binary>>, options) when option in [50, 54] do
+  defp parse_options(
+    <<option::8, 4::8, addr::bitstring-size(32),
+      remainder::binary>>, options) when option in [1, 50, 54] do
     parse_options remainder, Map.put(options,
                                      option,
                                      ipv4_binary_to_tuple(addr))

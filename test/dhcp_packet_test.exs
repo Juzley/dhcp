@@ -79,6 +79,6 @@ defmodule Dhcp.Test.Packet do
       # Check that the DHCP payload is correct - we do this by parsing the
       # framed packet again, as checking against the binary output is tricky
       # due to there being no fixed ordering for DHCP options.
-      assert Dhcp.Packet.parse(framed) == packet
+      assert Dhcp.Packet.parse(framed) == {:ok, packet}
     end
 end
