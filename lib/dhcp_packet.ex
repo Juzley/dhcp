@@ -2,6 +2,8 @@ defmodule Dhcp.Packet do
   require Record
   use Bitwise
 
+  # TODO: Parse requested options field.
+
   # Struture representing a DHCP packet.
   defstruct [
     op: 0, xid: 0, ciaddr: {0, 0, 0, 0}, yiaddr: {0, 0, 0, 0},
@@ -72,13 +74,14 @@ defmodule Dhcp.Packet do
   end
 
   # Frame options with a single IPv4 address.
-  defp frame_option({option, val}) when option in [1, 54] do
-    <<option :: 8, 4 :: 8, val :: bitstring-size(32)>>
+  defp frame_option({option, addr}) when option in [1, 54] do
+    enc = ipv4_tuple_to_binary(addr)
+    <<option::8, 4::8, enc::bitstring-size(32)>>
   end
 
   # Frame options with a single 4-byte value.
   defp frame_option({option, val}) when option in [51, 58, 59] do
-    <<option :: 8, 4 :: 8, val :: big-unsigned-size(32)>>
+    <<option::8, 4::8, val::big-unsigned-size(32)>>
   end
 
   # Stick an Ethernet header on the front of a packet.
@@ -192,6 +195,13 @@ defmodule Dhcp.Packet do
     parse_options remainder, Map.put(options,
                                      option,
                                      ipv4_binary_to_tuple(addr))
+  end
+
+  # Other 4-byte values, such as lease times.
+  defp parse_options(
+    <<option::8, 4::8, value::big-unsigned-size(32),
+      remainder::binary>>, options) when option in [51, 58, 59] do
+    parse_options remainder, Map.put(options, option, value)
   end
 
   # Skip other option types that we don't support
