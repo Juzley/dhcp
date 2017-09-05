@@ -1,5 +1,6 @@
 defmodule Dhcp.Packet do
   require Record
+  require Logger
   use Bitwise
 
   # TODO: Parse requested options field.

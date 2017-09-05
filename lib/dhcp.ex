@@ -1,18 +1,7 @@
 defmodule Dhcp do
-  @moduledoc """
-  Documentation for Dhcp.
-  """
+  use Application
 
-  @doc """
-  Hello world.
-
-  ## Examples
-
-      iex> Dhcp.hello
-      :world
-
-  """
-  def hello do
-    :world
+  def start(_type, _args) do
+    {:ok, _pid} = Dhcp.Server.start()
   end
 end
