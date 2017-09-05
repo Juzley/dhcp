@@ -25,7 +25,7 @@ defmodule Dhcp.Server do
 
   # Client API
 
-  def start do
+  def start_link(_arg) do
     GenServer.start_link(__MODULE__, :ok, [name: Dhcp.Server])
   end
 
