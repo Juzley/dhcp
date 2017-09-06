@@ -71,7 +71,7 @@ defmodule Dhcp.Packet do
           |> Enum.map(&ipv4_tuple_to_binary/1)
           |> Enum.reduce(fn(r, acc) -> r <> acc end)
     len = 4 * length(addrs)
-    <<3::8, len::8, enc::binary>>
+    <<option::8, len::8, enc::binary>>
   end
 
   # Frame options with a single IPv4 address.

@@ -40,6 +40,18 @@ defmodule Dhcp.Binding do
   end
 
   @doc """
+  Cancel an offer made to a client (i.e. mark it as not offered). This is used
+  when the server sees a client accept (i.e. request) and address from another
+  server.
+
+  Returns `:ok`.
+  """
+  def cancel_offer(pid, client_mac) do
+    GenServer.cast(pid, {:cancel_offer, client_mac})
+    :ok
+  end
+
+  @doc """
   Allocate an address to a client with MAC `client_mac`, if the address is
   not already allocated.
 
@@ -119,6 +131,22 @@ defmodule Dhcp.Binding do
     end
   end
 
+  # Handle a 'cancel offer' cast.
+  def handle_cast({:cancel_offer, client_mac}, state) do
+    # If the address was actually allocated, cancel the timer.
+    case Map.fetch(state.bindings, client_mac) do
+      {:ok, {_, :allocated, timer_ref}} ->
+        @timer.cancel(timer_ref)
+
+      _ ->
+        :ok
+    end
+
+    # The client is using a different DHCP server, release the address
+    # completely.
+    {:noreply, %{state | bindings: Map.delete(state.bindings, client_mac)}}
+  end
+
   # Determine the address to respond to an offer request with.
   defp offer_address(client_mac, client_req, state) do
     req_acceptable =
@@ -149,6 +177,7 @@ defmodule Dhcp.Binding do
         if req_acceptable, do: client_req, else: free_address(state)
     end
   end
+
 
   # Find a free address - prefer addresses that haven't already been offered.
   defp free_address(state) do

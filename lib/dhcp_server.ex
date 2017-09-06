@@ -176,7 +176,6 @@ defmodule Dhcp.Server do
       " to #{ipv4_to_string(server_address)}, requested address" <>
       " #{ipv4_to_string(requested_address)}")
 
-    # TODO: Forget the offer if this request isn't for us.
     if server_address == @server_address do
       result = Binding.allocate_address(state.bindings,
                                         packet.chaddr,
@@ -194,6 +193,10 @@ defmodule Dhcp.Server do
             " #{mac_to_string(packet.chaddr)}: #{reason}, sending Nak")
         frame_nak(packet, requested_address, state) |> send_response(state)
       end
+    else
+      # Forget any offers etc if the request is for a different server.
+      Binding.cancel_offer(state.bindings,
+                           packet.chaddr)
     end
   end
 
