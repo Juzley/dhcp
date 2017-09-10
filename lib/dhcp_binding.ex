@@ -4,6 +4,7 @@ defmodule Dhcp.Binding do
   """
   
   # TODO: Lease times - or maybe handle in the server?
+  # TODO: Infinite lease requests
   # TODO: Persist bindings to disk for restart.
 
   use GenServer
@@ -16,9 +17,10 @@ defmodule Dhcp.Binding do
   @doc """
   Starts the GenServer.
   """
-  def start(server_address, gateway_address, min_addr, max_addr) do
-    GenServer.start_link(__MODULE__,
-                         {server_address, gateway_address, min_addr, max_addr})
+  def start(server_address, gateway_address, min_addr, max_addr, max_lease) do
+    GenServer.start_link(
+      __MODULE__,
+      {server_address, gateway_address, min_addr, max_addr, max_lease})
   end
 
   @doc """
@@ -32,11 +34,11 @@ defmodule Dhcp.Binding do
   Get an address to offer to client with MAC `client_mac`, optionally
   considering an address requested by the client.
 
-  Returns {`:ok`, address} with the address to offer if successful, or
+  Returns {`:ok`, address, lease} with the address to offer if successful, or
   {`:
   """
-  def get_offer_address(pid, client_mac, client_req \\ nil) do
-    GenServer.call(pid, {:offer, client_mac, client_req})
+  def get_offer_address(pid, client_mac, req_addr \\ nil, req_lease \\ nil) do
+    GenServer.call(pid, {:offer, client_mac, req_addr, req_lease})
   end
 
   @doc """
@@ -82,21 +84,122 @@ defmodule Dhcp.Binding do
             gateway_address: gateway_address,
             min_address: min_address,
             max_address: max_address,
-            bindings: %{}}}
+            max_lease: max_lease,
+            bindings: %{},
+            timers: %{}}}
   end
 
   # Handle an 'offer' call.
-  def handle_call({:offer, client_mac, client_req}, _from, state) do
-    case offer_address(client_mac, client_req, state) do
-      nil ->
-        {:reply, {:error, :no_addresses}, state}
+  # From the RFC, consider addresses to offer in the following order:
+  # 1. The address that is currently bound to the client.
+  # 2. The address that was previously bound to the client.
+  # 3. The address requested by the client.
+  # 4. A free address from the pool.
+  # Before step 4, we also consider whether we have already offered the
+  # client an address, and offer the same one if so.
+  def handle_call({:offer, client_mac, req_addr, req_lease}, _from, state) do
+    Map.get(state.bindings, client_mac)
+    |> handle_offer(req_addr, req_lease, state)
+  end
 
-      addr ->
-        bindings = Map.put(state.bindings, client_mac, {addr, :offered, nil})
-        {:reply, {:ok, addr}, %{state | bindings: bindings}}
+  # Handle an offer for a currently bound client.
+  def handle_offer({:allocated, %{addr: addr, lease_expiry: lease_expiry}},
+                   _req_addr, req_lease, state) do
+    new_lease = if req_lease do
+      min(req_lease, state.max_lease)
+    else
+      lease_expiry - Timex.now().to_unix()
+    end
+
+    {:reply, {:ok, addr, new_lease}, state}
+  end
+
+  # Handle an offer for a client for which there is no existing binding info.
+  def handle_offer(_binding = nil, req_addr, req_lease, state) do
+    new_lease = if req_lease and req_lease < state.max_lease, do: req_lease,
+      else: state.max_lease
+    new_addr = free_address(state)
+
+    cond do
+      address_available?(state, req_addr) ->
+        binding_info = {:offered, %{addr: req_addr, lease_time: new_lease}}
+        bindings = Map.put(state.bindings, client_mac, binding_info)
+
+        {:reply, {:ok, req_addr, new_lease}, %{state | bindings: bindings}}
+
+      new_addr ->
+        binding_info = {:offered, %{addr: new_addr, lease_time: new_lease}}
+        bindings = Map.put(state.bindings, client_mac, binding_info)
+
+        {:reply, {:ok, new_addr, new_lease}, %{state | bindings: bindings}}
+
+      true ->
+        {:reply, {:error, :no_addresses}, state}
     end
   end
 
+  # Handle an offer for a client whose lease has expired.
+  def handle_offer({:released, %{addr: addr}}, req_addr, req_lease, state) do
+    new_lease = if req_lease and req_lease < state.max_lease, do: req_lease,
+      else: state.max_lease
+    new_addr = free_address(state)
+
+    cond do
+      address_available?(state, addr) ->
+        # The old address is still available.
+        binding_info = {:offered, %{addr: addr, lease_time: new_lease}}
+        bindings = Map.put(state.bindings, client_mac, binding_info)
+
+        {:reply, {:ok, addr, new_lease}, %{state | bindings: bindings}}
+
+      new_addr ->
+        # Use a newly allocated address.
+        binding_info = {:offered, %{addr: new_addr, lease_time: new_lease}}
+        bindings = Map.put(state.bindings, client_mac, binding_info)
+
+        {:reply, {:ok, new_addr, new_lease} %{state | bindings: bindings}}
+
+      true ->
+        # No addresses left.
+        {:reply, {:error, :no_addresses}, state}
+    end
+  end
+
+  # Handle an offer for a client which we have previously offered an
+  # address for.
+  def handle_offer({:offered, %{addr: addr}}, req_addr, req_lease, state) do
+    new_lease = if req_lease and req_lease < state.max_lease, do: req_lease,
+      else: state.max_lease
+    new_addr = free_address(state)
+
+    cond do
+      address_available?(state, req_addr) ->
+        # The requested address is acceptable.
+        binding_info = {:offered, %{addr: req_addr, lease_time: new_lease}}
+        bindings = Map.put(state.bindings, client_mac, binding_info)
+
+        {:reply, {:ok, req_addr, new_lease}, %{state | bindings: bindings}}
+
+      address_available?(state, addr) ->
+        # The address that was already offered is still acceptable.
+        binding_info = {:offered, %{addr: addr, lease_time: new_lease}}
+        bindings = Map.put(state.bindings, client_mac, binding_info)
+
+        {:reply, {:ok, addr, new_lease}, %{state | bindings: bindings}}
+
+      new_addr ->
+        # Use a newly allocated address.
+        binding_info = {:offered, %{addr: new_addr, lease_time: new_lease}}
+        bindings = Map.put(state.bindings, client_mac, binding_info)
+
+        {:reply, {:ok, addr, new_lease}, %{state | bindings: bindings}}
+
+      true ->
+        # No addresses left.
+        {:reply, {:error, :no_addresses}, state}
+    end
+  end
+         
   # Handle an 'allocate' call.
   def handle_call({:allocate, client_mac, addr}, _from, state) do
     if address_available?(state, addr) do
@@ -106,7 +209,7 @@ defmodule Dhcp.Binding do
                                             [self(), client_mac, addr])
       bindings = Map.put(state.bindings,
                          client_mac,
-                         {addr, :allocated, timer_ref})
+                         {addr, :allocated, {timer_ref, 86400}})
 
       {:reply, :ok, %{state | bindings: bindings}}
     else
@@ -117,12 +220,15 @@ defmodule Dhcp.Binding do
   # Handle a 'release' call.
   def handle_call({:release, client_mac, client_addr}, _from, state) do
     case Map.fetch(state.bindings, client_mac) do
-      {:ok, {^client_addr, :allocated, timer_ref}} ->
-        @timer.cancel(timer_ref)
+      {:ok, {^client_addr, {:allocated, client_info}}} ->
+
+        # Cancel the timer.
+        Map.get(state.timers, client_mac)
+        |> @timer.cancel()
+
         bindings = Map.put(state.bindings,
                            client_mac,
-                           {client_addr, :released, nil})
-
+                           {client_addr, {:released, client_info}})
         {:reply, :ok, %{state | bindings: bindings}}
 
       _ ->
@@ -134,50 +240,31 @@ defmodule Dhcp.Binding do
   # Handle a 'cancel offer' cast.
   def handle_cast({:cancel_offer, client_mac}, state) do
     # If the address was actually allocated, cancel the timer.
-    case Map.fetch(state.bindings, client_mac) do
-      {:ok, {_, :allocated, timer_ref}} ->
-        @timer.cancel(timer_ref)
-
-      _ ->
-        :ok
-    end
+    Map.fetch(state.timers, client_mac)
+    |> @timer.cancel()
 
     # The client is using a different DHCP server, release the address
     # completely.
     {:noreply, %{state | bindings: Map.delete(state.bindings, client_mac)}}
   end
 
-  # Determine the address to respond to an offer request with.
-  defp offer_address(client_mac, client_req, state) do
-    req_acceptable =
-      client_req != nil and client_req != {0, 0, 0, 0} and
-      address_available?(state, client_req)
+  # Determine the lease time to respond to an offer request with.
+  defp offer_lease(client_mac, client_req, state) do
+    if client_req do
+      # The client has requested a lease time - clamp it to the max lease time.
+      min([client_req, state.max_lease])
+    else
+      case Map.fetch(state.bindings, client_mac) do
+        {:ok, {_addr, :allocated, {_timer, expiry}}} ->
+          # If there is already an address allocated, return the remaining
+          # time.
+          Timex.diff(Timex.now, expiry, :seconds)
 
-    # From the RFC, consider addresses to offer in the following order:
-    # 1. The address that is currently bound to the client.
-    # 2. The address that was previously bound to the client.
-    # 3. The address requested by the client.
-    # 4. A free address from the pool.
-    # Before step 4, we also consider whether we have already offered the
-    # client an address, and offer the same one if so.
-    case Map.fetch(state.bindings, client_mac) do
-      {:ok, {addr, class, _}} ->
-        cond do
-          class in [:allocated, :released] ->
-            addr
-
-          req_acceptable ->
-            client_req
-
-          class == :offered ->
-            addr
-        end
-
-      :error ->
-        if req_acceptable, do: client_req, else: free_address(state)
+        _ ->
+          state.max_lease
+      end
     end
   end
-
 
   # Find a free address - prefer addresses that haven't already been offered.
   defp free_address(state) do
@@ -189,6 +276,7 @@ defmodule Dhcp.Binding do
   end
 
   # Determine whether a given address is available.
+  defp address_available?(state, nil), do: false
   defp address_available?(state, addr) do
     Enum.member?(address_pool(state), addr) and not
       MapSet.member?(unavailable_addresses(state), addr)

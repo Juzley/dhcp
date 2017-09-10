@@ -15,7 +15,7 @@ defmodule Dhcp.Mixfile do
   # Run "mix help compile.app" to learn about applications.
   def application do
     [
-      extra_applications: [:logger],
+      extra_applications: [:logger, :timex],
       mod: {Dhcp, []}
     ]
   end
@@ -27,7 +27,8 @@ defmodule Dhcp.Mixfile do
   defp deps do
     [
       {:pkt, github: "msantos/pkt", tag: "0.4.4"},
-      {:procket, github: "msantos/procket", tag: "0.8.0"}
+      {:procket, github: "msantos/procket", tag: "0.8.0"},
+      {:timex, "~> 3.1"}
     ]
   end
 end

@@ -18,10 +18,11 @@ defmodule Dhcp.Server do
   @subnet_mask Application.fetch_env!(:dhcp, :subnet_mask)
   @min_address Application.fetch_env!(:dhcp, :min_address)
   @max_address Application.fetch_env!(:dhcp, :max_address)
+  @max_lease   Application.fetch_env!(:dhcp, :max_lease)
 
 
   # TODO: Broadcast bit handling
-  # TODO: DHCPInform
+  # TODO: DHCPInform, DHCPDecline
 
   # Client API
 
@@ -95,7 +96,7 @@ defmodule Dhcp.Server do
   # Initialize the binding server.
   defp init_binding({:ok, state}) do
     result = Binding.start(@server_address, @gateway_address,
-                           @min_address, @max_address)
+                           @min_address, @max_address, @max_lease)
     case result do
       {:ok, bindings} ->
         {:ok, Map.put(state, :bindings, bindings)}
@@ -145,19 +146,22 @@ defmodule Dhcp.Server do
   # Handle a discovery packet.
   def handle_discover(state, packet) do
     requested_address = Map.get(packet.options, 50)
+    requested_lease = Map.get(packet.options, 51)
     Logger.info(
       "Received Discover message from #{mac_to_string(packet.chaddr)}," <>
       " requested address  #{ipv4_to_string(requested_address)}")
 
     offer_info = Binding.get_offer_address(state.bindings,
                                            packet.chaddr,
-                                           requested_address)
+                                           requested_address,
+                                           requested_lease)
     case offer_info do
-      {:ok, offer_address} ->
+      {:ok, offer_address, offer_lease} ->
         Logger.info(
           "Offering #{ipv4_to_string(offer_address)} to" <>
           " #{mac_to_string(packet.chaddr)}")
-        frame_offer(packet, offer_address, state) |> send_response(state)
+        frame_offer(packet, offer_address, offer_lease, state)
+        |> send_response(state)
 
       {:error, reason} ->
         Logger.error(
@@ -227,7 +231,7 @@ defmodule Dhcp.Server do
   end
 
   # Frame a DHCPOFFER
-  defp frame_offer(req_packet, offer_addr, state) do
+  defp frame_offer(req_packet, offer_addr, offer_lease, state) do
     Packet.frame(
       state.src_mac,
       req_packet.chaddr,
@@ -245,7 +249,7 @@ defmodule Dhcp.Server do
                     1  => @subnet_mask,
                     3  => [@gateway_address],
                     6  => [@dns_address],
-                    51 => 86400,
+                    51 => offer_lease,
                     54 => @server_address
         }
       }
