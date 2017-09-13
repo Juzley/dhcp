@@ -3,7 +3,6 @@ defmodule Dhcp.Binding do
     This module implements a GenServer which manages DHCP address bindings.
   """
   
-  # TODO: Lease times - or maybe handle in the server?
   # TODO: Infinite lease requests
   # TODO: Persist bindings to disk for restart.
 
@@ -57,7 +56,7 @@ defmodule Dhcp.Binding do
   Allocate an address to a client with MAC `client_mac`, if the address is
   not already allocated.
 
-  Returns `:ok` if the address was allocated or
+  Returns {`:ok`, address, lease} if the address was allocated or
   {`:error`, `:address_allocated`} if the address was already allocated.
   """
   def allocate_address(pid, client_mac, client_addr) do
@@ -150,8 +149,7 @@ defmodule Dhcp.Binding do
 
   # Handle an offer for a client for which there is no existing binding info.
   defp handle_offer(_binding = nil, client_mac, req_addr, req_lease, state) do
-    new_lease = if req_lease and req_lease < state.max_lease, do: req_lease,
-      else: state.max_lease
+    new_lease = offer_lease(state, req_lease)
     new_addr = free_address(state)
 
     cond do
@@ -173,8 +171,7 @@ defmodule Dhcp.Binding do
   # Handle an offer for a client whose lease has expired.
   defp handle_offer({:released, %{addr: addr}},
                    client_mac, _req_addr, req_lease, state) do
-    new_lease = if req_lease and req_lease < state.max_lease, do: req_lease,
-      else: state.max_lease
+    new_lease = offer_lease(state, req_lease)
     new_addr = free_address(state)
 
     cond do
@@ -200,8 +197,7 @@ defmodule Dhcp.Binding do
   # address for.
   defp handle_offer({:offered, %{addr: addr}},
                    client_mac, req_addr, req_lease, state) do
-    new_lease = if req_lease and req_lease < state.max_lease, do: req_lease,
-      else: state.max_lease
+    new_lease = offer_lease(state, req_lease)
     new_addr = free_address(state)
 
     cond do
@@ -232,7 +228,7 @@ defmodule Dhcp.Binding do
   # Handle a request from a client for which we have no state.
   defp handle_allocate(_binding=nil, client_mac, req_addr, req_lease, state) do
     # We don't expect this to happen, but handle it as if we had made an offer.
-    new_lease = min(req_lease, state.max_lease)
+    new_lease = offer_lease(state, req_lease)
     handle_allocate({:offered, %{lease_time: new_lease}},
                     client_mac, req_addr, req_lease, state)
   end
@@ -320,6 +316,10 @@ defmodule Dhcp.Binding do
     |> cancel_timer(client_mac)
     |> start_timer(client_mac, addr, period)
   end
+
+  # Determine the length of lease to offer to a client.
+  defp offer_lease(state, _req_lease=nil), do: state.max_lease
+  defp offer_lease(state, req_lease), do: min(req_lease, state.max_lease)
 
   # Find a free address - prefer addresses that haven't already been offered.
   defp free_address(state) do

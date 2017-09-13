@@ -43,7 +43,8 @@ defmodule Dhcp.Test.Binding do
     {:ok, pid} = Dhcp.Binding.start(@server_address,
                                     @gateway_address,
                                     {192, 168, 0, 1},
-                                    {192, 168, 0, 5})
+                                    {192, 168, 0, 5},
+                                    86400)
     :ets.insert(:parent_pid, {pid, self()})
     on_exit fn -> :ets.delete(:parent_pid, pid) end
 
@@ -52,49 +53,49 @@ defmodule Dhcp.Test.Binding do
 
   test "offers free address", %{bindings: pid} do
     assert Dhcp.Binding.get_offer_address(pid, @client_1) ==
-      {:ok, {192, 168, 0, 3}}
+      {:ok, {192, 168, 0, 3}, 86400}
   end
 
   test "offers same address for duplicate discovers", %{bindings: pid} do
     assert Dhcp.Binding.get_offer_address(pid, @client_1) ==
-      {:ok, {192, 168, 0, 3}}
+      {:ok, {192, 168, 0, 3}, 86400}
     assert Dhcp.Binding.get_offer_address(pid, @client_1) ==
-      {:ok, {192, 168, 0, 3}}
+      {:ok, {192, 168, 0, 3}, 86400}
   end
 
   test "prefers offering an address that hasn't been offered",
        %{bindings: pid} do
     assert Dhcp.Binding.get_offer_address(pid, @client_1) ==
-      {:ok, {192, 168, 0, 3}}
+      {:ok, {192, 168, 0, 3}, 86400}
     assert Dhcp.Binding.get_offer_address(pid, @client_2) ==
-      {:ok, {192, 168, 0, 4}}
+      {:ok, {192, 168, 0, 4}, 86400}
   end
 
   test "offers requested address to new clients", %{bindings: pid} do
     assert Dhcp.Binding.get_offer_address(pid, @client_1, {192, 168, 0, 5}) ==
-      {:ok, {192, 168, 0, 5}}
+      {:ok, {192, 168, 0, 5}, 86400}
   end
 
   test "ignores requested address if client bound to another address",
     %{bindings: pid} do
     assert Dhcp.Binding.get_offer_address(pid, @client_1) ==
-      {:ok, {192, 168, 0, 3}}
+      {:ok, {192, 168, 0, 3}, 86400}
     assert Dhcp.Binding.allocate_address(pid, @client_1, {192, 168, 0, 3}) ==
       :ok
     assert Dhcp.Binding.get_offer_address(pid, @client_1, {192, 168, 0, 5}) ==
-      {:ok, {192, 168, 0, 3}}
+      {:ok, {192, 168, 0, 3}, 86400}
   end
 
   test "ignores requested address if client released another address",
     %{bindings: pid} do
     assert Dhcp.Binding.get_offer_address(pid, @client_1) ==
-      {:ok, {192, 168, 0, 3}}
+      {:ok, {192, 168, 0, 3}, 86400}
     assert Dhcp.Binding.allocate_address(pid, @client_1, {192, 168, 0, 3}) ==
-      :ok
+      {:ok, {192, 168, 0, 3}, 86400}
     assert Dhcp.Binding.release_address(pid, @client_1, {192, 168, 0, 3}) ==
-      :ok
+      {:ok, {192, 168, 0, 3}, 86400}
     assert Dhcp.Binding.get_offer_address(pid, @client_1, {192, 168, 0, 5}) ==
-      {:ok, {192, 168, 0, 3}}
+      {:ok, {192, 168, 0, 3}, 86400}
   end
 
   test "prefers requested address to previously offered address",
