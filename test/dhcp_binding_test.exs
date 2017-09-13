@@ -81,7 +81,7 @@ defmodule Dhcp.Test.Binding do
     assert Dhcp.Binding.get_offer_address(pid, @client_1) ==
       {:ok, {192, 168, 0, 3}, 86400}
     assert Dhcp.Binding.allocate_address(pid, @client_1, {192, 168, 0, 3}) ==
-      :ok
+      {:ok, {192, 168, 0, 3}, 86400}
     assert Dhcp.Binding.get_offer_address(pid, @client_1, {192, 168, 0, 5}) ==
       {:ok, {192, 168, 0, 3}, 86400}
   end
@@ -93,7 +93,7 @@ defmodule Dhcp.Test.Binding do
     assert Dhcp.Binding.allocate_address(pid, @client_1, {192, 168, 0, 3}) ==
       {:ok, {192, 168, 0, 3}, 86400}
     assert Dhcp.Binding.release_address(pid, @client_1, {192, 168, 0, 3}) ==
-      {:ok, {192, 168, 0, 3}, 86400}
+      :ok
     assert Dhcp.Binding.get_offer_address(pid, @client_1, {192, 168, 0, 5}) ==
       {:ok, {192, 168, 0, 3}, 86400}
   end
@@ -101,51 +101,51 @@ defmodule Dhcp.Test.Binding do
   test "prefers requested address to previously offered address",
     %{bindings: pid} do
     assert Dhcp.Binding.get_offer_address(pid, @client_1) ==
-      {:ok, {192, 168, 0, 3}}
+      {:ok, {192, 168, 0, 3}, 86400}
     assert Dhcp.Binding.get_offer_address(pid, @client_1, {192, 168, 0, 5}) ==
-      {:ok, {192, 168, 0, 5}}
+      {:ok, {192, 168, 0, 5}, 86400}
   end
 
   test "offers a previously allocated address if no others are available",
     %{bindings: pid} do
     assert Dhcp.Binding.get_offer_address(pid, @client_1) ==
-      {:ok, {192, 168, 0, 3}}
+      {:ok, {192, 168, 0, 3}, 86400}
     assert Dhcp.Binding.allocate_address(pid, @client_1, {192, 168, 0, 3}) ==
-      :ok
+      {:ok, {192, 168, 0, 3}, 86400}
     assert Dhcp.Binding.get_offer_address(pid, @client_2) ==
-      {:ok, {192, 168, 0, 4}}
+      {:ok, {192, 168, 0, 4}, 86400}
     assert Dhcp.Binding.allocate_address(pid, @client_2, {192, 168, 0, 4}) ==
-      :ok
+      {:ok, {192, 168, 0, 4}, 86400}
     assert Dhcp.Binding.get_offer_address(pid, @client_3) ==
-      {:ok, {192, 168, 0, 5}}
+      {:ok, {192, 168, 0, 5}, 86400}
     assert Dhcp.Binding.allocate_address(pid, @client_3, {192, 168, 0, 5}) ==
-      :ok
+      {:ok, {192, 168, 0, 5}, 86400}
     assert Dhcp.Binding.release_address(pid, @client_1, {192, 168, 0, 3}) ==
       :ok
     assert Dhcp.Binding.get_offer_address(pid, @client_4) ==
-      {:ok, {192, 168, 0, 3}}
+      {:ok, {192, 168, 0, 3}, 86400}
   end
 
   test "successfully allocates an offered address", %{bindings: pid} do
     assert Dhcp.Binding.get_offer_address(pid, @client_1) ==
-      {:ok, {192, 168, 0, 3}}
+      {:ok, {192, 168, 0, 3}, 86400}
     assert Dhcp.Binding.allocate_address(pid, @client_1, {192, 168, 0, 3}) ==
-      :ok
+      {:ok, {192, 168, 0, 3}, 86400}
   end
 
   test "starts the lease timer when allocating addresses", %{bindings: pid} do
     assert Dhcp.Binding.get_offer_address(pid, @client_1) ==
-      {:ok, {192, 168, 0, 3}}
+      {:ok, {192, 168, 0, 3}, 86400}
     assert Dhcp.Binding.allocate_address(pid, @client_1, {192, 168, 0, 3}) ==
-      :ok
+      {:ok, {192, 168, 0, 3}, 86400}
     check_timer_start(86400, pid, @client_1, {192, 168, 0, 3})
   end
 
   test "successfully releases an allocated address", %{bindings: pid} do
     assert Dhcp.Binding.get_offer_address(pid, @client_1) ==
-      {:ok, {192, 168, 0, 3}}
+      {:ok, {192, 168, 0, 3}, 86400}
     assert Dhcp.Binding.allocate_address(pid, @client_1, {192, 168, 0, 3}) ==
-      :ok
+      {:ok, {192, 168, 0, 3}, 86400}
     assert Dhcp.Binding.release_address(pid, @client_1, {192, 168, 0, 3}) ==
       :ok
   end
@@ -157,9 +157,9 @@ defmodule Dhcp.Test.Binding do
 
   test "rejects release of wrong address", %{bindings: pid} do
     assert Dhcp.Binding.get_offer_address(pid, @client_1) ==
-      {:ok, {192, 168, 0, 3}}
+      {:ok, {192, 168, 0, 3}, 86400}
     assert Dhcp.Binding.allocate_address(pid, @client_1, {192, 168, 0, 3}) ==
-      :ok
+      {:ok, {192, 168, 0, 3}, 86400}
     assert Dhcp.Binding.release_address(pid, @client_2, {192, 168, 0, 4}) ==
       {:error, :address_not_allocated}
   end
@@ -167,18 +167,18 @@ defmodule Dhcp.Test.Binding do
   test "rejects release of an address bound to a different client",
       %{bindings: pid} do
     assert Dhcp.Binding.get_offer_address(pid, @client_1) ==
-      {:ok, {192, 168, 0, 3}}
+      {:ok, {192, 168, 0, 3}, 86400}
     assert Dhcp.Binding.allocate_address(pid, @client_1, {192, 168, 0, 3}) ==
-      :ok
+      {:ok, {192, 168, 0, 3}, 86400}
     assert Dhcp.Binding.release_address(pid, @client_2, {192, 168, 0, 3}) ==
       {:error, :address_not_allocated}
   end
 
   test "cancels the lease timer when releasing addresses", %{bindings: pid} do
     assert Dhcp.Binding.get_offer_address(pid, @client_1) ==
-      {:ok, {192, 168, 0, 3}}
+      {:ok, {192, 168, 0, 3}, 86400}
     assert Dhcp.Binding.allocate_address(pid, @client_1, {192, 168, 0, 3}) ==
-      :ok
+      {:ok, {192, 168, 0, 3}, 86400}
     check_timer_start(86400, pid, @client_1, {192, 168, 0, 3})
     assert Dhcp.Binding.release_address(pid, @client_1, {192, 168, 0, 3}) ==
       :ok
@@ -187,35 +187,35 @@ defmodule Dhcp.Test.Binding do
 
   test "rejects allocation of a bound address", %{bindings: pid} do
     assert Dhcp.Binding.get_offer_address(pid, @client_1) ==
-      {:ok, {192, 168, 0, 3}}
+      {:ok, {192, 168, 0, 3}, 86400}
     assert Dhcp.Binding.allocate_address(pid, @client_1, {192, 168, 0, 3}) ==
-      :ok
+      {:ok, {192, 168, 0, 3}, 86400}
     assert Dhcp.Binding.allocate_address(pid, @client_2, {192, 168, 0, 3}) ==
       {:error, :address_allocated}
   end
 
   test "offers the bound address", %{bindings: pid} do
     assert Dhcp.Binding.get_offer_address(pid, @client_1) ==
-      {:ok, {192, 168, 0, 3}}
+      {:ok, {192, 168, 0, 3}, 86400}
     assert Dhcp.Binding.allocate_address(pid, @client_1, {192, 168, 0, 3}) ==
-      :ok
+      {:ok, {192, 168, 0, 3}, 86400}
     assert Dhcp.Binding.get_offer_address(pid, @client_1) ==
-      {:ok, {192, 168, 0, 3}}
+      {:ok, {192, 168, 0, 3}, 86400}
   end
 
   test "handles running out of addresses", %{bindings: pid} do
     assert Dhcp.Binding.get_offer_address(pid, @client_1) ==
-      {:ok, {192, 168, 0, 3}}
+      {:ok, {192, 168, 0, 3}, 86400}
     assert Dhcp.Binding.allocate_address(pid, @client_1, {192, 168, 0, 3}) ==
-      :ok
+      {:ok, {192, 168, 0, 3}, 86400}
     assert Dhcp.Binding.get_offer_address(pid, @client_2) ==
-      {:ok, {192, 168, 0, 4}}
+      {:ok, {192, 168, 0, 4}, 86400}
     assert Dhcp.Binding.allocate_address(pid, @client_2, {192, 168, 0, 4}) ==
-      :ok
+      {:ok, {192, 168, 0, 4}, 86400}
     assert Dhcp.Binding.get_offer_address(pid, @client_3) ==
-      {:ok, {192, 168, 0, 5}}
+      {:ok, {192, 168, 0, 5}, 86400}
     assert Dhcp.Binding.allocate_address(pid, @client_3, {192, 168, 0, 5}) ==
-      :ok
+      {:ok, {192, 168, 0, 5}, 86400}
     assert Dhcp.Binding.get_offer_address(pid, @client_4) ==
       {:error, :no_addresses}
   end

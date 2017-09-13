@@ -59,8 +59,8 @@ defmodule Dhcp.Binding do
   Returns {`:ok`, address, lease} if the address was allocated or
   {`:error`, `:address_allocated`} if the address was already allocated.
   """
-  def allocate_address(pid, client_mac, client_addr) do
-    GenServer.call(pid, {:allocate, client_mac, client_addr})
+  def allocate_address(pid, client_mac, client_addr, req_lease \\ nil) do
+    GenServer.call(pid, {:allocate, client_mac, client_addr, req_lease})
   end
 
   @doc """
@@ -359,8 +359,8 @@ defmodule Dhcp.Binding do
   # Get a MapSet of all addresses of a particular binding class.
   defp get_addresses(state, class) do
     Map.values(state.bindings)
-    |> Enum.filter(fn({_, c, _}) -> c == class end)
-    |> Enum.map(fn({a, _, _}) -> a end)
+    |> Enum.filter(fn({c, _}) -> c == class end)
+    |> Enum.map(fn({_, %{addr: a}}) -> a end)
     |> MapSet.new()
   end
 
@@ -387,6 +387,6 @@ defmodule Dhcp.Binding do
 
   # Get a unix timestamp representing the time now.
   defp unix_now do
-    Timex.now().to_unix()
+    Timex.now() |> Timex.to_unix()
   end
 end
