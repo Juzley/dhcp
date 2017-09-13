@@ -8,7 +8,8 @@ defmodule Dhcp.Mixfile do
       elixir: "~> 1.5",
       elixirc_paths: elixirc_paths(Mix.env),
       start_permanent: Mix.env == :prod,
-      deps: deps()
+      deps: deps(),
+      aliases: aliases()
     ]
   end
 
@@ -29,6 +30,12 @@ defmodule Dhcp.Mixfile do
       {:pkt, github: "msantos/pkt", tag: "0.4.4"},
       {:procket, github: "msantos/procket", tag: "0.8.0"},
       {:timex, "~> 3.1"}
+    ]
+  end
+
+  defp aliases do
+    [
+      test: "test --no-start"
     ]
   end
 end
