@@ -16,18 +16,15 @@ defmodule Dhcp.Server do
   @gateway_address Application.fetch_env!(:dhcp, :gateway_address)
   @dns_address Application.fetch_env!(:dhcp, :dns_address)
   @subnet_mask Application.fetch_env!(:dhcp, :subnet_mask)
-  @min_address Application.fetch_env!(:dhcp, :min_address)
-  @max_address Application.fetch_env!(:dhcp, :max_address)
-  @max_lease   Application.fetch_env!(:dhcp, :max_lease)
 
-
+  # TODO: unicast rx socket
   # TODO: Broadcast bit handling
   # TODO: DHCPInform, DHCPDecline
 
   # Client API
 
   def start_link(_arg) do
-    GenServer.start_link(__MODULE__, :ok, [name: Dhcp.Server])
+    GenServer.start_link(__MODULE__, :ok, name: __MODULE__)
   end
 
   # Server API
@@ -37,7 +34,6 @@ defmodule Dhcp.Server do
              |> init_rx_socket()
              |> init_tx_socket()
              |> init_src_mac()
-             |> init_binding()
 
     case result do
       {:error, reason} ->
@@ -50,7 +46,6 @@ defmodule Dhcp.Server do
 
   # Initialize the receive socket.
   defp init_rx_socket({:ok, state}) do
-    # TODO: Do we need a socket on the unicast addr too?
     case result = @udp.open(@dhcp_server_port,
                             [:binary, {:ifaddr, @broadcast_address}]) do
       {:ok, socket} ->
@@ -92,20 +87,6 @@ defmodule Dhcp.Server do
     end
   end
   defp init_src_mac(err), do: err
-
-  # Initialize the binding server.
-  defp init_binding({:ok, state}) do
-    result = Binding.start(@server_address, @gateway_address,
-                           @min_address, @max_address, @max_lease)
-    case result do
-      {:ok, bindings} ->
-        {:ok, Map.put(state, :bindings, bindings)}
-
-      _ ->
-        result
-    end
-  end
-  defp init_binding(err), do: err
 
   # UDP packet callback.
   def handle_info({_, _socket}, state), do: {:noreply, state}
@@ -151,7 +132,7 @@ defmodule Dhcp.Server do
       "Received Discover message from #{mac_to_string(packet.chaddr)}," <>
       " requested address  #{ipv4_to_string(requested_address)}")
 
-    offer_info = Binding.get_offer_address(state.bindings,
+    offer_info = Binding.get_offer_address(Dhcp.Binding,
                                            packet.chaddr,
                                            requested_address,
                                            requested_lease)
@@ -181,7 +162,7 @@ defmodule Dhcp.Server do
       " #{ipv4_to_string(requested_address)}")
 
     if server_address == @server_address do
-      result = Binding.allocate_address(state.bindings,
+      result = Binding.allocate_address(Dhcp.Binding,
                                         packet.chaddr,
                                         requested_address)
       case result do
@@ -199,7 +180,7 @@ defmodule Dhcp.Server do
       end
     else
       # Forget any offers etc if the request is for a different server.
-      Binding.cancel_offer(state.bindings,
+      Binding.cancel_offer(Dhcp.Binding,
                            packet.chaddr)
     end
   end
@@ -213,7 +194,7 @@ defmodule Dhcp.Server do
       " #{ipv4_to_string(packet.ciaddr)}")
 
     if server_address == @server_address do
-      result = Binding.release_address(state.bindings,
+      result = Binding.release_address(Dhcp.Binding,
                                        packet.chaddr,
                                        packet.ciaddr)
       case result do

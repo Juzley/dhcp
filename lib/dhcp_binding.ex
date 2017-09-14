@@ -9,17 +9,19 @@ defmodule Dhcp.Binding do
   use GenServer
   use Bitwise
 
+  @dets_table "bindings.dets"
   @timer Application.get_env(:dhcp, :timer_impl, :timer)
+  @min_address Application.fetch_env!(:dhcp, :min_address)
+  @max_address Application.fetch_env!(:dhcp, :max_address)
+  @max_lease   Application.fetch_env!(:dhcp, :max_lease)
 
   # Client API
 
   @doc """
   Starts the GenServer.
   """
-  def start(server_address, gateway_address, min_addr, max_addr, max_lease) do
-    GenServer.start_link(
-      __MODULE__,
-      {server_address, gateway_address, min_addr, max_addr, max_lease})
+  def start(_arg \\ :ok) do
+    GenServer.start_link(__MODULE__, :ok, name: __MODULE__)
   end
 
   @doc """
@@ -78,15 +80,10 @@ defmodule Dhcp.Binding do
   # Server API
 
   # Initialize an instance of the binding GenServer.
-  def init({server_address, gateway_address, min_address, max_address,
-    max_lease}) do
-    {:ok, %{server_address: server_address,
-            gateway_address: gateway_address,
-            min_address: min_address,
-            max_address: max_address,
-            max_lease: max_lease,
-            bindings: %{},
-            timers: %{}}}
+  def init(:ok) do
+    {:ok, dets_ref} = :dets.open_file(@dets_table, [])
+    # TODO: Load bindings from table.
+    {:ok, %{dets_ref: dets_ref, bindings: %{}, timers: %{}}}
   end
 
   # Handle an 'offer' call.
@@ -139,7 +136,7 @@ defmodule Dhcp.Binding do
   defp handle_offer({:allocated, %{addr: addr, lease_expiry: lease_expiry}},
                    _client_mac, _req_addr, req_lease, state) do
     new_lease = if req_lease do
-      min(req_lease, state.max_lease)
+      min(req_lease, @max_lease)
     else
       lease_expiry - unix_now()
     end
@@ -149,7 +146,7 @@ defmodule Dhcp.Binding do
 
   # Handle an offer for a client for which there is no existing binding info.
   defp handle_offer(_binding = nil, client_mac, req_addr, req_lease, state) do
-    new_lease = offer_lease(state, req_lease)
+    new_lease = offer_lease(req_lease)
     new_addr = free_address(state)
 
     cond do
@@ -171,7 +168,7 @@ defmodule Dhcp.Binding do
   # Handle an offer for a client whose lease has expired.
   defp handle_offer({:released, %{addr: addr}},
                    client_mac, _req_addr, req_lease, state) do
-    new_lease = offer_lease(state, req_lease)
+    new_lease = offer_lease(req_lease)
     new_addr = free_address(state)
 
     cond do
@@ -197,7 +194,7 @@ defmodule Dhcp.Binding do
   # address for.
   defp handle_offer({:offered, %{addr: addr}},
                    client_mac, req_addr, req_lease, state) do
-    new_lease = offer_lease(state, req_lease)
+    new_lease = offer_lease(req_lease)
     new_addr = free_address(state)
 
     cond do
@@ -228,7 +225,7 @@ defmodule Dhcp.Binding do
   # Handle a request from a client for which we have no state.
   defp handle_allocate(_binding=nil, client_mac, req_addr, req_lease, state) do
     # We don't expect this to happen, but handle it as if we had made an offer.
-    new_lease = offer_lease(state, req_lease)
+    new_lease = offer_lease(req_lease)
     handle_allocate({:offered, %{lease_time: new_lease}},
                     client_mac, req_addr, req_lease, state)
   end
@@ -255,7 +252,7 @@ defmodule Dhcp.Binding do
     client_mac, _addr, req_lease, state) do
     if req_lease do
       # Extending an existing lease.
-      new_lease = min(req_lease, state.max_lease)
+      new_lease = min(req_lease, @max_lease)
 
       state
       |> restart_timer(client_mac, cur_addr, new_lease)
@@ -274,11 +271,34 @@ defmodule Dhcp.Binding do
   # Update the state with a new binding, returning the new state.
   defp update_bindings(state, client_mac, class, addr, lease_time \\ nil,
                        lease_expiry \\ nil) do
-    binding_data = %{addr: addr,
-                     lease_time: lease_time,
-                     lease_expiry: lease_expiry}
-    bindings = Map.put(state.bindings, client_mac, {class, binding_data})
+    old_data = Map.get(state.bindings, client_mac)
+    new_data = {class,
+                %{addr: addr,
+                  lease_time: lease_time,
+                  lease_expiry: lease_expiry}}
+    bindings = Map.put(state.bindings, client_mac, new_data)
+    checkpoint_binding(state, client_mac, old_data, new_data)
+
     %{state | bindings: bindings}
+  end
+
+  # Add an allocation to the dets table.
+  defp checkpoint_binding(
+    state, client_mac, _old_data,
+    {:allocated, %{addr: addr,lease_expiry: lease_expiry}}) do
+    :dets.insert(state.dets_ref, {client_mac, {addr, lease_expiry}})
+    :dets.sync(state.dets_ref)
+  end
+
+  # Remove an allocation from the dets table.
+  defp checkpoint_binding(state, client_mac, {:allocated, _}, {new_class, _})
+    when new_class != :allocated do
+    :dets.delete(state.dets_ref, client_mac)
+    :dets.sync(state.dets_ref)
+  end
+
+  # No update to be made to the dets table.
+  defp checkpoint_binding(_state, _client_mac, _old_data, _new_data) do
   end
 
   # Delete a binding, returning the new state.
@@ -318,13 +338,12 @@ defmodule Dhcp.Binding do
   end
 
   # Determine the length of lease to offer to a client.
-  defp offer_lease(state, _req_lease=nil), do: state.max_lease
-  defp offer_lease(state, req_lease), do: min(req_lease, state.max_lease)
+  defp offer_lease(_req_lease=nil), do: @max_lease
+  defp offer_lease(req_lease), do: min(req_lease, @max_lease)
 
   # Find a free address - prefer addresses that haven't already been offered.
   defp free_address(state) do
-    state
-    |> address_pool()
+    address_pool()
     |> Enum.filter(&(address_available?(state, &1)))
     |> Enum.sort_by(&(if address_offered?(state, &1), do: 0, else: 1))
     |> List.first
@@ -333,7 +352,7 @@ defmodule Dhcp.Binding do
   # Determine whether a given address is available.
   defp address_available?(_state, nil), do: false
   defp address_available?(state, addr) do
-    Enum.member?(address_pool(state), addr) and not
+    Enum.member?(address_pool(), addr) and not
       MapSet.member?(unavailable_addresses(state), addr)
   end
 
@@ -344,10 +363,7 @@ defmodule Dhcp.Binding do
 
   # Get a MapSet of currently unavailable addresses.
   defp unavailable_addresses(state) do
-    state
-    |> allocated_addresses
-    |> MapSet.put(state.server_address)
-    |> MapSet.put(state.gateway_address)
+    state |> allocated_addresses
   end
 
   # Get a MapSet of all allocated addresses.
@@ -365,9 +381,9 @@ defmodule Dhcp.Binding do
   end
 
   # Get the current full address pool for the subnet, as a list.
-  defp address_pool state do
-    min = address_to_int(state.min_address)
-    max = address_to_int(state.max_address)
+  defp address_pool do
+    min = address_to_int(@min_address)
+    max = address_to_int(@max_address)
     for n <- min..max, do: int_to_address(n)
   end
 

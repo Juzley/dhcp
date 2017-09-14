@@ -1,8 +1,6 @@
 defmodule Dhcp.Test.Binding do
   use ExUnit.Case
 
-  @server_address {192, 168, 0, 2}
-  @gateway_address {192, 168, 0, 1}
   @client_1 {11, 22, 33, 44, 55, 66}
   @client_2 {22, 33, 44, 55, 66, 77}
   @client_3 {33, 44, 55, 66, 77, 88}
@@ -40,11 +38,7 @@ defmodule Dhcp.Test.Binding do
   end
 
   setup do
-    {:ok, pid} = Dhcp.Binding.start(@server_address,
-                                    @gateway_address,
-                                    {192, 168, 0, 1},
-                                    {192, 168, 0, 5},
-                                    86400)
+    {:ok, pid} = Dhcp.Binding.start(:ok)
     :ets.insert(:parent_pid, {pid, self()})
     on_exit fn -> :ets.delete(:parent_pid, pid) end
 
