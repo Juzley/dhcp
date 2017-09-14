@@ -1,5 +1,5 @@
 defmodule Dhcp.Test.Binding do
-  use ExUnit.Case
+  use ExUnit.Case, async: false
 
   @client_1 {11, 22, 33, 44, 55, 66}
   @client_2 {22, 33, 44, 55, 66, 77}
@@ -7,40 +7,24 @@ defmodule Dhcp.Test.Binding do
   @client_4 {44, 55, 66, 77, 88, 99}
 
   defp check_timer_start time, pid, mac, addr do
-    receive do
-      {:timer_start, msg_time, args} ->
-        assert msg_time == time
-        assert args == [pid, mac, addr]
-
-      _ ->
-        assert false
-    after
-      50 -> assert false
-    end
+    assert_received({:timer_start, ^time, [^pid, ^mac, ^addr]})
   end
 
   defp check_timer_cancel ref do
-    receive do
-      {:timer_cancel, cancel_ref} ->
-          assert cancel_ref == ref
-
-      _ ->
-        assert false
-    after
-      50 -> assert false
-    end
-  end
-
-  setup_all do
-    :ets.new(:parent_pid, [:set, :named_table, :public])
-
-    :ok
+    assert_received({:timer_cancel, ^ref})
   end
 
   setup do
+    true = Process.register(self(), :test_process)
+    on_exit fn ->
+      try do 
+        :dets.delete_all_objects("bindings.dets")
+      rescue
+        _ -> :ok
+      end
+    end
+
     {:ok, pid} = Dhcp.Binding.start(:ok)
-    :ets.insert(:parent_pid, {pid, self()})
-    on_exit fn -> :ets.delete(:parent_pid, pid) end
 
     %{bindings: pid}
   end

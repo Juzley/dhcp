@@ -82,8 +82,12 @@ defmodule Dhcp.Binding do
   # Initialize an instance of the binding GenServer.
   def init(:ok) do
     {:ok, dets_ref} = :dets.open_file(@dets_table, [])
-    # TODO: Load bindings from table.
-    {:ok, %{dets_ref: dets_ref, bindings: %{}, timers: %{}}}
+    state =
+      %{dets_ref: dets_ref, bindings: %{}, timers: %{}}
+      |> recover_bindings()
+      |> restart_timers()
+
+    {:ok, state}
   end
 
   # Handle an 'offer' call.
@@ -285,8 +289,10 @@ defmodule Dhcp.Binding do
   # Add an allocation to the dets table.
   defp checkpoint_binding(
     state, client_mac, _old_data,
-    {:allocated, %{addr: addr,lease_expiry: lease_expiry}}) do
-    :dets.insert(state.dets_ref, {client_mac, {addr, lease_expiry}})
+    {:allocated,
+      %{addr: addr, lease_time: lease_time, lease_expiry: lease_expiry}}) do
+    :dets.insert(state.dets_ref,
+                 {client_mac, {addr, lease_time, lease_expiry}})
     :dets.sync(state.dets_ref)
   end
 
@@ -299,6 +305,32 @@ defmodule Dhcp.Binding do
 
   # No update to be made to the dets table.
   defp checkpoint_binding(_state, _client_mac, _old_data, _new_data) do
+  end
+
+  # Rebuild the bindings map from the dets table, returns the new state.
+  defp recover_bindings(state) do
+    :dets.foldl(
+      fn({client_mac, {addr, lease_time, lease_expiry}}, acc) ->
+        new_binding =
+          {:allocated,
+            %{addr: addr, lease_time: lease_time, lease_expiry: lease_expiry}}
+        bindings = Map.put(acc.bindings, client_mac, new_binding)
+
+        %{acc | bindings: bindings}
+      end,
+      state, state.dets_ref)
+  end
+
+  # Restart timers for recovered bindings, returns the new state.
+  defp restart_timers(state) do
+    state.bindings
+    |> Map.to_list()
+    |> List.foldl(
+      state,
+      fn({client_mac, {_, %{addr: addr, lease_expiry: lease_expiry}}}, acc) ->
+        period = lease_expiry - unix_now()
+        start_timer(acc, client_mac, addr, period)
+      end)
   end
 
   # Delete a binding, returning the new state.
