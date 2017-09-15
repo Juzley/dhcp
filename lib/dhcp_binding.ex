@@ -29,8 +29,8 @@ defmodule Dhcp.Binding do
   @doc """
   Stops the GenServer.
   """
-  def stop(pid) do
-    GenServer.stop(pid)
+  def stop() do
+    GenServer.stop(__MODULE__)
   end
 
   @doc """

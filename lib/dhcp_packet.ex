@@ -80,7 +80,7 @@ defmodule Dhcp.Packet do
 
   # Frame options with a single IPv4 address.
   defp frame_option({option, addr})
-    when option in [:subnet_mask, :server_address] do
+    when option in [:subnet_mask, :server_address, :requested_address] do
     enc = ipv4_tuple_to_binary(addr)
     <<convert_option(option)::8, 4::8, enc::bitstring-size(32)>>
   end

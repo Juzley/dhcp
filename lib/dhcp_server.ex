@@ -182,11 +182,12 @@ defmodule Dhcp.Server do
                                         packet.chaddr,
                                         requested_address)
       case result do
-        :ok ->
+        {:ok, addr, lease} ->
           Logger.info(
             "Allocated #{ipv4_to_string(requested_address)} to" <>
-            " #{mac_to_string(packet.chaddr)}, sending Ack")
-        frame_ack(packet, requested_address, state) |> send_response(state)
+            " #{mac_to_string(packet.chaddr)} for #{lease} seconds," <>
+            " sending Ack")
+        frame_ack(packet, addr, lease, state) |> send_response(state)
 
         {:error, reason} ->
           Logger.error(
@@ -254,17 +255,17 @@ defmodule Dhcp.Server do
   end
 
   # Frame a DHCPACK
-  defp frame_ack(req_packet, req_addr, state) do
+  defp frame_ack(req_packet, addr, lease, state) do
     Packet.frame(
       state.src_mac,
       req_packet.chaddr,
       @server_address,
-      req_addr,
+      addr,
       %Packet{
         op: :reply,
         xid: req_packet.xid,
         ciaddr: @empty_address,
-        yiaddr: req_addr,
+        yiaddr: addr,
         siaddr: @server_address,
         giaddr: req_packet.giaddr,
         chaddr: req_packet.chaddr,
@@ -272,7 +273,7 @@ defmodule Dhcp.Server do
                     :subnet_mask      => @subnet_mask,
                     :gateway_address  => [@gateway_address],
                     :dns_address      => [@dns_address],
-                    :lease_time       => 86400,
+                    :lease_time       => lease,
                     :server_address   => @server_address
         }
       }

@@ -1,4 +1,4 @@
-defmodule Dhcp.ServerTest do
+defmodule Dhcp.Test.Server do
   use ExUnit.Case, async: false
   alias Dhcp.Server
   alias Dhcp.Packet
@@ -21,8 +21,14 @@ defmodule Dhcp.ServerTest do
     parsed
   end
 
-  defp inject(pid, packet) do
+  defp inject(packet, pid) do
     send(pid, {:udp, :dummy_socket, @empty_addr, 67, packet})
+  end
+
+  defp cleanup_binding do
+    if Enum.find(Process.registered(), fn p -> p == Binding end) do
+      Binding.stop()
+    end
   end
 
   defp cleanup_dets do
@@ -33,15 +39,16 @@ defmodule Dhcp.ServerTest do
     end
   end
 
-  setup_all do
-    {:ok, _pid} = Binding.start()
-    :ok
+  defp cleanup do
+    cleanup_binding()
+    cleanup_dets()
   end
 
   setup do
-    cleanup_dets()
-    on_exit fn -> cleanup_dets() end
+    cleanup()
+    on_exit fn -> cleanup() end
 
+    {:ok, _} = Binding.start()
     true = Process.register(self(), :test_process)
     {:ok, pid} = Server.start()
 
@@ -49,16 +56,16 @@ defmodule Dhcp.ServerTest do
   end
 
   test "responds to a discover packet", %{server: pid} do
-    packet = %Packet{
+    %Packet{
       op: :request,
       xid: 1,
       chaddr: @client_mac,
       options: %{message_type: :discover,
                  client_id:    @client_mac}
     }
-    framed = frame(packet)
-
-    inject(pid, framed)
+    |> frame
+    |> inject(pid)
+    
     assert_receive({:packet, sent_packet})
 
     parsed = parse(sent_packet)
@@ -69,6 +76,36 @@ defmodule Dhcp.ServerTest do
       yiaddr: {192, 168, 0, 3},
       chaddr: @client_mac,
       options: %{message_type:    :offer,
+                 server_address:  {192, 168, 0, 2},
+                 subnet_mask:     {255, 255, 255, 0},
+                 gateway_address: [{192, 168, 0, 1}],
+                 dns_address:     [{192, 168, 0, 1}],
+                 lease_time:      86400}
+    }
+  end
+
+  test "acks a valid request packet", %{server: pid} do
+    %Packet{
+      op: :request,
+      xid: 2,
+      chaddr: @client_mac,
+      options: %{message_type:      :request,
+                 client_id:         @client_mac,
+                 server_address:    {192, 168, 0, 2},
+                 requested_address: {192, 168, 0, 3}}
+    }
+    |> frame
+    |> inject(pid)
+
+    assert_receive({:packet, sent_packet})
+    parsed = parse(sent_packet)
+    assert parsed == %Packet{
+      op: :reply,
+      xid: 2,
+      siaddr: {192, 168, 0, 2},
+      yiaddr: {192, 168, 0, 3},
+      chaddr: @client_mac,
+      options: %{message_type:    :ack,
                  server_address:  {192, 168, 0, 2},
                  subnet_mask:     {255, 255, 255, 0},
                  gateway_address: [{192, 168, 0, 1}],

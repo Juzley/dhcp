@@ -32,7 +32,7 @@ defmodule Dhcp.Test.Binding do
     cleanup_dets()
     on_exit fn -> cleanup_dets() end
 
-    {:ok, pid} = Dhcp.Binding.start(:ok)
+    {:ok, pid} = Dhcp.Binding.start()
 
     %{bindings: pid}
   end
@@ -267,8 +267,8 @@ defmodule Dhcp.Test.Binding do
       {:ok, {192, 168, 0, 5}, 86400}
 
     set_timestamp(1)
-    Dhcp.Binding.stop(pid)
-    {:ok, new_pid} = Dhcp.Binding.start(:ok)
+    Dhcp.Binding.stop()
+    {:ok, new_pid} = Dhcp.Binding.start()
 
     assert Dhcp.Binding.get_offer_address(new_pid, @client_1) ==
       {:ok, {192, 168, 0, 5}, 86399}
@@ -282,8 +282,8 @@ defmodule Dhcp.Test.Binding do
       {:ok, {192, 168, 0, 5}, 86400}
 
     set_timestamp(1)
-    Dhcp.Binding.stop(pid)
-    {:ok, new_pid} = Dhcp.Binding.start(:ok)
+    Dhcp.Binding.stop()
+    {:ok, new_pid} = Dhcp.Binding.start()
 
     assert Dhcp.Binding.get_offer_address(new_pid, @client_1) ==
       {:ok, {192, 168, 0, 5}, 86399}
@@ -295,8 +295,8 @@ defmodule Dhcp.Test.Binding do
       pid, @client_1, req_addr: {192, 168, 0, 5}) ==
       {:ok, {192, 168, 0, 5}, 86400}
 
-    Dhcp.Binding.stop(pid)
-    {:ok, new_pid} = Dhcp.Binding.start(:ok)
+    Dhcp.Binding.stop()
+    {:ok, new_pid} = Dhcp.Binding.start()
 
     assert Dhcp.Binding.get_offer_address(new_pid, @client_1) ==
       {:ok, {192, 168, 0, 3}, 86400}
@@ -311,8 +311,8 @@ defmodule Dhcp.Test.Binding do
     assert Dhcp.Binding.release_address(pid, @client_1, {192, 168, 0, 5}) ==
       :ok
 
-    Dhcp.Binding.stop(pid)
-    {:ok, new_pid} = Dhcp.Binding.start(:ok)
+    Dhcp.Binding.stop()
+    {:ok, new_pid} = Dhcp.Binding.start()
 
     assert Dhcp.Binding.get_offer_address(new_pid, @client_1) ==
       {:ok, {192, 168, 0, 3}, 86400}
