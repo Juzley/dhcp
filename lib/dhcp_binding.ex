@@ -9,8 +9,10 @@ defmodule Dhcp.Binding do
   use GenServer
   use Bitwise
 
-  @dets_table "bindings.dets"
   @timer Application.get_env(:dhcp, :timer_impl, :timer)
+  @timex Application.get_env(:dhcp, :timex_impl, Timex)
+
+  @dets_table "bindings.dets"
   @min_address Application.fetch_env!(:dhcp, :min_address)
   @max_address Application.fetch_env!(:dhcp, :max_address)
   @max_lease   Application.fetch_env!(:dhcp, :max_lease)
@@ -38,7 +40,9 @@ defmodule Dhcp.Binding do
   Returns {`:ok`, address, lease} with the address to offer if successful, or
   {`:
   """
-  def get_offer_address(pid, client_mac, req_addr \\ nil, req_lease \\ nil) do
+  def get_offer_address(pid, client_mac, req_info \\ []) do
+    req_addr = Keyword.get(req_info, :req_addr)
+    req_lease = Keyword.get(req_info, :req_lease)
     GenServer.call(pid, {:offer, client_mac, req_addr, req_lease})
   end
 

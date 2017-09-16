@@ -1,5 +1,5 @@
 defmodule Dhcp.Test.GenUDP do
-  def open _port do
+  def open _port, _options \\ [] do
     {:ok, :dummy_socket}
   end
 

@@ -126,16 +126,17 @@ defmodule Dhcp.Server do
 
   # Handle a discovery packet.
   def handle_discover(state, packet) do
-    requested_address = Map.get(packet.options, 50)
-    requested_lease = Map.get(packet.options, 51)
+    req_addr = Map.get(packet.options, 50)
+    req_lease = Map.get(packet.options, 51)
     Logger.info(
       "Received Discover message from #{mac_to_string(packet.chaddr)}," <>
-      " requested address  #{ipv4_to_string(requested_address)}")
+      " requested address #{ipv4_to_string(req_addr)}, " <>
+      " requested lease #{req_lease}") 
 
     offer_info = Binding.get_offer_address(Dhcp.Binding,
                                            packet.chaddr,
-                                           requested_address,
-                                           requested_lease)
+                                           req_addr: req_addr,
+                                           req_lease: req_lease)
     case offer_info do
       {:ok, offer_address, offer_lease} ->
         Logger.info(
@@ -186,7 +187,7 @@ defmodule Dhcp.Server do
   end
 
   # Handle a release packet.
-  defp handle_release(state, packet) do
+  defp handle_release(_state, packet) do
     server_address = Map.get(packet.options, 54)
     Logger.info(
       "Received Release message from #{mac_to_string(packet.chaddr)} to" <>

@@ -14,10 +14,22 @@ defmodule Dhcp.Test.Binding do
     assert_received({:timer_cancel, ^ref})
   end
 
+  defp set_timestamp t do
+    :ets.insert(:timex_mock, {:timestamp, t})
+  end
+
+  setup_all do
+    :timex_mock = :ets.new(:timex_mock, [:named_table])
+
+    %{}
+  end
+
   setup do
     true = Process.register(self(), :test_process)
+
     on_exit fn ->
       try do 
+        :ets.delete_all_objects(:timex_mock)
         :dets.delete_all_objects("bindings.dets")
       rescue
         _ -> :ok
@@ -60,7 +72,8 @@ defmodule Dhcp.Test.Binding do
       {:ok, {192, 168, 0, 3}, 86400}
     assert Dhcp.Binding.allocate_address(pid, @client_1, {192, 168, 0, 3}) ==
       {:ok, {192, 168, 0, 3}, 86400}
-    assert Dhcp.Binding.get_offer_address(pid, @client_1, {192, 168, 0, 5}) ==
+    assert Dhcp.Binding.get_offer_address(
+      pid, @client_1, req_addr: {192, 168, 0, 5}) ==
       {:ok, {192, 168, 0, 3}, 86400}
   end
 
@@ -72,7 +85,8 @@ defmodule Dhcp.Test.Binding do
       {:ok, {192, 168, 0, 3}, 86400}
     assert Dhcp.Binding.release_address(pid, @client_1, {192, 168, 0, 3}) ==
       :ok
-    assert Dhcp.Binding.get_offer_address(pid, @client_1, {192, 168, 0, 5}) ==
+    assert Dhcp.Binding.get_offer_address(
+      pid, @client_1, req_addr: {192, 168, 0, 5}) ==
       {:ok, {192, 168, 0, 3}, 86400}
   end
 
@@ -196,6 +210,28 @@ defmodule Dhcp.Test.Binding do
       {:ok, {192, 168, 0, 5}, 86400}
     assert Dhcp.Binding.get_offer_address(pid, @client_4) ==
       {:error, :no_addresses}
+  end
+
+  test "offers a shorter lease than max if requested", %{bindings: pid} do
+    assert Dhcp.Binding.get_offer_address(pid, @client_1, req_lease: 3600) ==
+      {:ok, {192, 168, 0, 3}, 3600}
+  end
+
+  test "allocates the offered lease", %{bindings: pid} do
+    assert Dhcp.Binding.get_offer_address(pid, @client_1, req_lease: 3600) ==
+      {:ok, {192, 168, 0, 3}, 3600}
+    assert Dhcp.Binding.allocate_address(pid, @client_1, {192, 168, 0, 3}) ==
+      {:ok, {192, 168, 0, 3}, 3600}
+  end
+
+  test "offers the remaining lease time to a bound client", %{bindings: pid} do
+    assert Dhcp.Binding.get_offer_address(pid, @client_1, req_lease: 3600) ==
+      {:ok, {192, 168, 0, 3}, 3600}
+    assert Dhcp.Binding.allocate_address(pid, @client_1, {192, 168, 0, 3}) ==
+      {:ok, {192, 168, 0, 3}, 3600}
+    set_timestamp(1)
+    assert Dhcp.Binding.get_offer_address(pid, @client_1) ==
+      {:ok, {192, 168, 0, 3}, 3599}
   end
 end
 
