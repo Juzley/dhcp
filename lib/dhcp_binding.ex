@@ -4,7 +4,7 @@ defmodule Dhcp.Binding do
   """
   
   # TODO: Infinite lease requests
-  # TODO: Persist bindings to disk for restart.
+  # TODO: T1/T2 - maybe in server?
 
   use GenServer
   use Bitwise
@@ -439,6 +439,6 @@ defmodule Dhcp.Binding do
 
   # Get a unix timestamp representing the time now.
   defp unix_now do
-    Timex.now() |> Timex.to_unix()
+    @timex.now() |> @timex.to_unix()
   end
 end

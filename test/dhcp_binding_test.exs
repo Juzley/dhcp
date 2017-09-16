@@ -18,23 +18,19 @@ defmodule Dhcp.Test.Binding do
     :ets.insert(:timex_mock, {:timestamp, t})
   end
 
-  setup_all do
-    :timex_mock = :ets.new(:timex_mock, [:named_table])
-
-    %{}
+  defp cleanup_dets do
+    try do 
+      :dets.delete_all_objects("bindings.dets")
+    rescue
+      _ -> :ok
+    end
   end
 
   setup do
     true = Process.register(self(), :test_process)
-
-    on_exit fn ->
-      try do 
-        :ets.delete_all_objects(:timex_mock)
-        :dets.delete_all_objects("bindings.dets")
-      rescue
-        _ -> :ok
-      end
-    end
+    :timex_mock = :ets.new(:timex_mock, [:named_table])
+    cleanup_dets()
+    on_exit fn -> cleanup_dets() end
 
     {:ok, pid} = Dhcp.Binding.start(:ok)
 
@@ -62,7 +58,8 @@ defmodule Dhcp.Test.Binding do
   end
 
   test "offers requested address to new clients", %{bindings: pid} do
-    assert Dhcp.Binding.get_offer_address(pid, @client_1, {192, 168, 0, 5}) ==
+    assert Dhcp.Binding.get_offer_address(
+      pid, @client_1, req_addr: {192, 168, 0, 5}) ==
       {:ok, {192, 168, 0, 5}, 86400}
   end
 
@@ -94,7 +91,8 @@ defmodule Dhcp.Test.Binding do
     %{bindings: pid} do
     assert Dhcp.Binding.get_offer_address(pid, @client_1) ==
       {:ok, {192, 168, 0, 3}, 86400}
-    assert Dhcp.Binding.get_offer_address(pid, @client_1, {192, 168, 0, 5}) ==
+    assert Dhcp.Binding.get_offer_address(
+      pid, @client_1, req_addr: {192, 168, 0, 5}) ==
       {:ok, {192, 168, 0, 5}, 86400}
   end
 
@@ -217,6 +215,11 @@ defmodule Dhcp.Test.Binding do
       {:ok, {192, 168, 0, 3}, 3600}
   end
 
+  test "offers the max lease if higher is requested", %{bindings: pid} do
+    assert Dhcp.Binding.get_offer_address(pid, @client_1, req_lease: 100000) ==
+      {:ok, {192, 168, 0, 3}, 86400}
+  end
+
   test "allocates the offered lease", %{bindings: pid} do
     assert Dhcp.Binding.get_offer_address(pid, @client_1, req_lease: 3600) ==
       {:ok, {192, 168, 0, 3}, 3600}
@@ -232,6 +235,87 @@ defmodule Dhcp.Test.Binding do
     set_timestamp(1)
     assert Dhcp.Binding.get_offer_address(pid, @client_1) ==
       {:ok, {192, 168, 0, 3}, 3599}
+  end
+
+  test "accepts extension for a bound client", %{bindings: pid} do
+    assert Dhcp.Binding.get_offer_address(pid, @client_1, req_lease: 3600) ==
+      {:ok, {192, 168, 0, 3}, 3600}
+    assert Dhcp.Binding.allocate_address(pid, @client_1, {192, 168, 0, 3}) ==
+      {:ok, {192, 168, 0, 3}, 3600}
+    set_timestamp(1800)
+    assert Dhcp.Binding.allocate_address(
+      pid, @client_1, {192, 168, 0, 3}, 3600) ==
+      {:ok, {192, 168, 0, 3}, 3600}
+  end
+
+  test "caps extensions to max lease", %{bindings: pid} do
+    assert Dhcp.Binding.get_offer_address(pid, @client_1, req_lease: 3600) ==
+      {:ok, {192, 168, 0, 3}, 3600}
+    assert Dhcp.Binding.allocate_address(pid, @client_1, {192, 168, 0, 3}) ==
+      {:ok, {192, 168, 0, 3}, 3600}
+    set_timestamp(1800)
+    assert Dhcp.Binding.allocate_address(
+      pid, @client_1, {192, 168, 0, 3}, 100000) ==
+      {:ok, {192, 168, 0, 3}, 86400}
+  end
+
+  test "recovers allocated addresses from disk", %{bindings: pid} do
+    assert Dhcp.Binding.get_offer_address(
+      pid, @client_1, req_addr: {192, 168, 0, 5}) ==
+      {:ok, {192, 168, 0, 5}, 86400}
+    assert Dhcp.Binding.allocate_address(pid, @client_1, {192, 168, 0, 5}) ==
+      {:ok, {192, 168, 0, 5}, 86400}
+
+    set_timestamp(1)
+    Dhcp.Binding.stop(pid)
+    {:ok, new_pid} = Dhcp.Binding.start(:ok)
+
+    assert Dhcp.Binding.get_offer_address(new_pid, @client_1) ==
+      {:ok, {192, 168, 0, 5}, 86399}
+  end
+
+  test "restarts timer when recovering addresses", %{bindings: pid} do
+    assert Dhcp.Binding.get_offer_address(
+      pid, @client_1, req_addr: {192, 168, 0, 5}) ==
+      {:ok, {192, 168, 0, 5}, 86400}
+    assert Dhcp.Binding.allocate_address(pid, @client_1, {192, 168, 0, 5}) ==
+      {:ok, {192, 168, 0, 5}, 86400}
+
+    set_timestamp(1)
+    Dhcp.Binding.stop(pid)
+    {:ok, new_pid} = Dhcp.Binding.start(:ok)
+
+    assert Dhcp.Binding.get_offer_address(new_pid, @client_1) ==
+      {:ok, {192, 168, 0, 5}, 86399}
+    check_timer_start(86399, new_pid, @client_1, {192, 168, 0, 5})
+  end
+
+  test "doesn't recover offered addresses from disk", %{bindings: pid} do
+    assert Dhcp.Binding.get_offer_address(
+      pid, @client_1, req_addr: {192, 168, 0, 5}) ==
+      {:ok, {192, 168, 0, 5}, 86400}
+
+    Dhcp.Binding.stop(pid)
+    {:ok, new_pid} = Dhcp.Binding.start(:ok)
+
+    assert Dhcp.Binding.get_offer_address(new_pid, @client_1) ==
+      {:ok, {192, 168, 0, 3}, 86400}
+  end
+
+  test "doesn't recover released addresses from disk", %{bindings: pid} do
+    assert Dhcp.Binding.get_offer_address(
+      pid, @client_1, req_addr: {192, 168, 0, 5}) ==
+      {:ok, {192, 168, 0, 5}, 86400}
+    assert Dhcp.Binding.allocate_address(pid, @client_1, {192, 168, 0, 5}) ==
+      {:ok, {192, 168, 0, 5}, 86400}
+    assert Dhcp.Binding.release_address(pid, @client_1, {192, 168, 0, 5}) ==
+      :ok
+
+    Dhcp.Binding.stop(pid)
+    {:ok, new_pid} = Dhcp.Binding.start(:ok)
+
+    assert Dhcp.Binding.get_offer_address(new_pid, @client_1) ==
+      {:ok, {192, 168, 0, 3}, 86400}
   end
 end
 
