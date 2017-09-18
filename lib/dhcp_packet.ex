@@ -24,6 +24,7 @@ defmodule Dhcp.Packet do
   Frame a DHCP packet, adding Ethernet and UDP headers.
   """
   def frame(src_mac, dst_mac, src_ip, dst_ip, packet) do
+    op = convert_op(packet.op)
     options = frame_options(packet.options)
     ciaddr = ipv4_tuple_to_binary(packet.ciaddr)
     yiaddr = ipv4_tuple_to_binary(packet.yiaddr)
@@ -32,7 +33,7 @@ defmodule Dhcp.Packet do
     chaddr = mac_tuple_to_binary(packet.chaddr)
     flags = if packet.broadcast_flag, do: 1 <<< 15, else: 0
 
-    <<packet.op  :: size(8),
+    <<op         :: size(8),
       1          :: size(8),               # Hardware type, Ethernet
       6          :: size(8),               # MAC address length
       0          :: size(8),               # Hops
@@ -63,26 +64,31 @@ defmodule Dhcp.Packet do
   end
 
   # Frame the message type option.
-  defp frame_option({53, val}), do: <<53::8, 1::8, val::8>>
+  defp frame_option({:message_type, val}) do
+    <<53::8, 1::8, convert_message_type(val)::8>>
+  end
 
   # Frame options with a list of IPv4 addresses.
-  defp frame_option({option, addrs}) when option in [3, 6] do
+  defp frame_option({option, addrs})
+    when option in [:gateway_address, :dns_address] do
     enc = addrs
           |> Enum.map(&ipv4_tuple_to_binary/1)
           |> Enum.reduce(fn(r, acc) -> r <> acc end)
     len = 4 * length(addrs)
-    <<option::8, len::8, enc::binary>>
+    <<convert_option(option)::8, len::8, enc::binary>>
   end
 
   # Frame options with a single IPv4 address.
-  defp frame_option({option, addr}) when option in [1, 54] do
+  defp frame_option({option, addr})
+    when option in [:subnet_mask, :server_address] do
     enc = ipv4_tuple_to_binary(addr)
-    <<option::8, 4::8, enc::bitstring-size(32)>>
+    <<convert_option(option)::8, 4::8, enc::bitstring-size(32)>>
   end
 
   # Frame options with a single 4-byte value.
-  defp frame_option({option, val}) when option in [51, 58, 59] do
-    <<option::8, 4::8, val::big-unsigned-size(32)>>
+  defp frame_option({option, val})
+    when option in [:lease_time, :renewal_time, :rebinding_time] do
+    <<convert_option(option)::8, 4::8, val::big-unsigned-size(32)>>
   end
 
   # Stick an Ethernet header on the front of a packet.
@@ -153,7 +159,7 @@ defmodule Dhcp.Packet do
               options         :: binary>>) do
     options = parse_options(options, %{})
     packet = %Dhcp.Packet{
-      op: op,
+      op: convert_op(op),
       xid: xid,
       ciaddr: ipv4_binary_to_tuple(ciaddr),
       yiaddr: ipv4_binary_to_tuple(yiaddr),
@@ -183,7 +189,10 @@ defmodule Dhcp.Packet do
   # DHCP message type
   defp parse_options(<<53::8, 1::8,
                      dhcp_type::8, remainder::binary>>, options) do
-    parse_options remainder, Map.put(options, 53, dhcp_type)
+    new_options = Map.put(options,
+                          :message_type,
+                          convert_message_type(dhcp_type))
+    parse_options(remainder, new_options)
   end
 
   # Client identifier
@@ -191,7 +200,7 @@ defmodule Dhcp.Packet do
                      mac_addr::bitstring-size(48),
                      remainder::binary>>, options) do
     parse_options remainder, Map.put(options,
-                                     61,
+                                     :client_id,
                                      mac_binary_to_tuple(mac_addr))
   end
 
@@ -200,7 +209,7 @@ defmodule Dhcp.Packet do
     <<option::8, 4::8, addr::bitstring-size(32),
       remainder::binary>>, options) when option in [1, 50, 54] do
     parse_options remainder, Map.put(options,
-                                     option,
+                                     convert_option(option),
                                      ipv4_binary_to_tuple(addr))
   end
 
@@ -208,7 +217,7 @@ defmodule Dhcp.Packet do
   defp parse_options(
     <<option::8, 4::8, value::big-unsigned-size(32),
       remainder::binary>>, options) when option in [51, 58, 59] do
-    parse_options remainder, Map.put(options, option, value)
+    parse_options remainder, Map.put(options, convert_option(option), value)
   end
 
   # Skip other option types that we don't support
@@ -238,5 +247,70 @@ defmodule Dhcp.Packet do
   # Convert a MAC in tuple form to binary.
   defp mac_tuple_to_binary {oct6, oct5, oct4, oct3, oct2, oct1} do
     <<oct6::8, oct5::8, oct4::8, oct3::8, oct2::8, oct1::8>>
+  end
+
+  # Convert Bootp op types between numerical and atom forms.
+  defp convert_op(op) when is_number(op) do
+    case op do
+      1 -> :request
+      2 -> :reply
+    end
+  end
+  defp convert_op(op) when is_atom(op) do
+    case op do
+      :request -> 1
+      :reply   -> 2
+    end
+  end
+
+  # Convert DHCP message types between numerical and atom forms.
+  defp convert_message_type(type) when is_number(type) do
+    case type do
+      1 -> :discover
+      2 -> :offer
+      3 -> :request
+      5 -> :ack
+      6 -> :nak
+      7 -> :release
+    end
+  end
+  defp convert_message_type(type) when is_atom(type) do
+    case type do
+      :discover -> 1
+      :offer -> 2
+      :request -> 3
+      :ack -> 5
+      :nak -> 6
+      :release -> 7
+    end
+  end
+
+  # Convert DHCP option types between numerical and atom forms.
+  defp convert_option(type) when is_number(type) do
+    case type do
+      1  -> :subnet_mask
+      3  -> :gateway_address
+      6  -> :dns_address
+      50 -> :requested_address
+      51 -> :lease_time
+      54 -> :server_address
+      58 -> :renewal_time
+      59 -> :rebinding_time
+      61 -> :client_id
+      _  -> type
+    end
+  end
+  defp convert_option(type) when is_atom(type) do
+    case type do
+      :subnet_mask       -> 1
+      :gateway_address   -> 3
+      :dns_address       -> 6
+      :requested_address -> 50
+      :lease_time        -> 51
+      :server_address    -> 54
+      :renewal_time      -> 58
+      :rebinding_time    -> 59
+      :client_id         -> 61
+    end
   end
 end

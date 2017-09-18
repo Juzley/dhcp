@@ -1,4 +1,4 @@
-defmodule Dhcp.Test.Timer do
+defmodule Dhcp.Test.Mock.Timer do
   def apply_after time, _module, _func, args do
     send(:test_process, {:timer_start, time, args})
 

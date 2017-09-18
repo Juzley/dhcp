@@ -13,36 +13,36 @@ defmodule Dhcp.Test.Packet do
 
     test "parses a discover packet" do
       assert Dhcp.Packet.parse(discover_packet()) ==
-        {:ok, %Dhcp.Packet{op: 1,
+        {:ok, %Dhcp.Packet{op: :request,
                            xid: 15645,
                            ciaddr: {0, 0, 0, 0},
                            yiaddr: {0, 0, 0, 0},
                            siaddr: {0, 0, 0, 0},
                            giaddr: {0, 0, 0, 0},
                            chaddr: {0, 11, 130, 1, 252, 66},
-                           options: %{50 => {0, 0, 0, 0},
-                                      53 => 1,
-                                      61 => {0, 11, 130, 1, 252, 66}}}}
+                           options: %{:requested_address => {0, 0, 0, 0},
+                                      :message_type => :discover,
+                                      :client_id => {0, 11, 130, 1, 252, 66}}}}
     end
 
     test "parses a request packet" do
       assert Dhcp.Packet.parse(request_packet()) ==
-        {:ok, %Dhcp.Packet{op: 1,
+        {:ok, %Dhcp.Packet{op: :request,
                            xid: 15646,
                            ciaddr: {0, 0, 0, 0},
                            yiaddr: {0, 0, 0, 0},
                            siaddr: {0, 0, 0, 0},
                            giaddr: {0, 0, 0, 0},
                            chaddr: {0, 11, 130, 1, 252, 66},
-                           options: %{50 => {192, 168, 0, 10},
-                                      53 => 3,
-                                      54 => {192, 168, 0, 1},
-                                      61 => {0, 11, 130, 1, 252, 66}}}}
+                           options: %{:requested_address => {192, 168, 0, 10},
+                                      :message_type => :request,
+                                      :server_address => {192, 168, 0, 1},
+                                      :client_id => {0, 11, 130, 1, 252, 66}}}}
     end
 
     test "frames an offer packet" do
       packet = %Dhcp.Packet{
-        op: 2,
+        op: :reply,
         xid: 15645,
         ciaddr: {0, 0, 0, 0},
         yiaddr: {192, 168, 0, 10},
@@ -50,12 +50,12 @@ defmodule Dhcp.Test.Packet do
         giaddr: {0, 0, 0, 0},
         chaddr: {0, 11, 130, 1, 252, 66},
         options: %{
-          53 => 2,
-          1  => {255, 255, 255, 0},
-          58 => 1800,
-          59 => 3150,
-          51 => 3600,
-          54 => {192, 168, 0, 1}
+          :message_type   => :offer,
+          :subnet_mask    => {255, 255, 255, 0},
+          :renewal_time   => 1800,
+          :rebinding_time => 3150,
+          :lease_time     => 3600,
+          :server_address => {192, 168, 0, 1}
         }
       }
       framed = Dhcp.Packet.frame({0x00, 0x08, 0x74, 0xad, 0xf1, 0x9b},

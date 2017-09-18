@@ -7,6 +7,7 @@ defmodule Dhcp.Server do
   alias Dhcp.Packet
 
   @udp Application.get_env(:dhcp, :udp_impl, :gen_udp)
+  @packet Application.get_env(:dhcp, :packet_impl, :packet)
 
   @dhcp_server_port 67
   @empty_address {0, 0, 0, 0}
@@ -17,7 +18,6 @@ defmodule Dhcp.Server do
   @dns_address Application.fetch_env!(:dhcp, :dns_address)
   @subnet_mask Application.fetch_env!(:dhcp, :subnet_mask)
 
-  # TODO: unicast rx socket
   # TODO: Broadcast bit handling
   # TODO: DHCPInform, DHCPDecline
 
@@ -31,7 +31,8 @@ defmodule Dhcp.Server do
 
   def init(:ok) do
     result = {:ok, %{}}
-             |> init_rx_socket()
+             |> init_bcast_rx_socket()
+             |> init_ucast_rx_socket()
              |> init_tx_socket()
              |> init_src_mac()
 
@@ -44,25 +45,38 @@ defmodule Dhcp.Server do
     end
   end
 
-  # Initialize the receive socket.
-  defp init_rx_socket({:ok, state}) do
+  # Initialize the unicast receive socket.
+  defp init_ucast_rx_socket({:ok, state}) do
     case result = @udp.open(@dhcp_server_port,
-                            [:binary, {:ifaddr, @broadcast_address}]) do
+                            [:binary]) do
       {:ok, socket} ->
-        {:ok, Map.put(state, :rx_socket, socket)}
+        {:ok, Map.put(state, :ucast_rx_socket, socket)}
 
       _ ->
         result
     end
   end
-  defp init_rx_socket(err), do: err
+  defp init_ucast_rx_socket(err), do: err
+
+  # Initialize the broadcast receive socket.
+  defp init_bcast_rx_socket({:ok, state}) do
+    case result = @udp.open(@dhcp_server_port,
+                            [:binary, {:ifaddr, @broadcast_address}]) do
+      {:ok, socket} ->
+        {:ok, Map.put(state, :bcast_rx_socket, socket)}
+
+      _ ->
+        result
+    end
+  end
+  defp init_bcast_rx_socket(err), do: err
 
   # Initialize the send socket.
   defp init_tx_socket({:ok, state}) do
-    case result = :packet.socket(0x800) do
+    case result = @packet.socket(0x800) do
       {:ok, socket} ->
-        intf = :packet.default_interface()
-        ifindex = :packet.ifindex(socket, intf)
+        intf = @packet.default_interface()
+        ifindex = @packet.ifindex(socket, intf)
         {:ok, Map.merge(state, %{tx_socket: socket, ifindex: ifindex})}
 
       _ ->
@@ -74,7 +88,7 @@ defmodule Dhcp.Server do
   # Get the MAC address for the interface we're going to send on.
   defp init_src_mac({:ok, state}) do
     mac_info =
-      :packet.default_interface()
+      @packet.default_interface()
       |> List.first
       |> :inet.ifget([:hwaddr])
 
@@ -104,14 +118,14 @@ defmodule Dhcp.Server do
 
   # Handle a successfully parsed DHCP packet.
   defp handle_packet(state, packet) do
-    case Map.get(packet.options, 53, :no_type) do
-      1 ->
+    case Map.get(packet.options, :message_type, :no_type) do
+      :discover ->
         handle_discover(state, packet)
 
-      3 ->
+      :request ->
         handle_request(state, packet)
 
-      7 ->
+      :release ->
         handle_release(state, packet)
 
       :no_type ->
@@ -125,9 +139,9 @@ defmodule Dhcp.Server do
   end
 
   # Handle a discovery packet.
-  def handle_discover(state, packet) do
-    req_addr = Map.get(packet.options, 50)
-    req_lease = Map.get(packet.options, 51)
+  defp handle_discover(state, packet) do
+    req_addr = Map.get(packet.options, :requested_address)
+    req_lease = Map.get(packet.options, :lease_time)
     Logger.info(
       "Received Discover message from #{mac_to_string(packet.chaddr)}," <>
       " requested address #{ipv4_to_string(req_addr)}, " <>
@@ -154,8 +168,8 @@ defmodule Dhcp.Server do
 
   # Handle a request packet.
   defp handle_request(state, packet) do
-    requested_address = Map.get(packet.options, 50)
-    server_address = Map.get(packet.options, 54)
+    requested_address = Map.get(packet.options, :requested_address)
+    server_address = Map.get(packet.options, :server_address)
 
     Logger.info(
       "Received Request message from #{mac_to_string(packet.chaddr)}" <>
@@ -220,19 +234,19 @@ defmodule Dhcp.Server do
       @server_address,
       offer_addr,
       %Packet{
-        op: 2,
+        op: :reply,
         xid: req_packet.xid,
         ciaddr: @empty_address,
         yiaddr: offer_addr,
         siaddr: @server_address,
         giaddr: req_packet.giaddr,
         chaddr: req_packet.chaddr,
-        options: %{ 53 => 2,
-                    1  => @subnet_mask,
-                    3  => [@gateway_address],
-                    6  => [@dns_address],
-                    51 => offer_lease,
-                    54 => @server_address
+        options: %{ :message_type    => :offer,
+                    :subnet_mask     => @subnet_mask,
+                    :gateway_address => [@gateway_address],
+                    :dns_address     => [@dns_address],
+                    :lease_time      => offer_lease,
+                    :server_address  => @server_address
         }
       }
     )
@@ -246,19 +260,19 @@ defmodule Dhcp.Server do
       @server_address,
       req_addr,
       %Packet{
-        op: 2,
+        op: :reply,
         xid: req_packet.xid,
         ciaddr: @empty_address,
         yiaddr: req_addr,
         siaddr: @server_address,
         giaddr: req_packet.giaddr,
         chaddr: req_packet.chaddr,
-        options: %{ 53 => 5,
-                    1  => @subnet_mask,
-                    3  => [@gateway_address],
-                    6  => [@dns_address],
-                    51 => 86400,
-                    54 => @server_address
+        options: %{ :message_type     => :ack,
+                    :subnet_mask      => @subnet_mask,
+                    :gateway_address  => [@gateway_address],
+                    :dns_address      => [@dns_address],
+                    :lease_time       => 86400,
+                    :server_address   => @server_address
         }
       }
     )
@@ -271,21 +285,21 @@ defmodule Dhcp.Server do
       req_packet.chaddr,
       @server_address,
       req_addr,
-      %{ op: 2,
+      %{ op: :reply,
          xid: req_packet.xid,
          ciaddr: @empty_address,
          yiaddr: @empty_address,
          siaddr: @empty_address,
          giaddr: @empty_address,
          chaddr: req_packet.chaddr,
-         options: %{ 53 => 6,
-                     54 => @server_address
+         options: %{ :message_type   => :nak,
+                     :server_address => @server_address
          }
       })
   end
 
   # Send a framed response to a client.
   defp send_response(packet, state) do
-    :ok = :packet.send(state.tx_socket, state.ifindex, packet)
+    :ok = @packet.send(state.tx_socket, state.ifindex, packet)
   end
 end

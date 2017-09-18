@@ -1,4 +1,4 @@
-defmodule Dhcp.Test.Timex do
+defmodule Dhcp.Test.Mock.Timex do
   def now do
     case :ets.lookup(:timex_mock, :timestamp) do
       [timestamp: t] ->
