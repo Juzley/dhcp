@@ -91,6 +91,12 @@ defmodule Dhcp.Packet do
     <<convert_option(option)::8, 4::8, val::big-unsigned-size(32)>>
   end
 
+  # Frame a client ID.
+  defp frame_option({option=:client_id, mac}) do
+    enc = mac_tuple_to_binary(mac)
+    <<convert_option(option)::8, 6::8, enc::bitstring-size(48)>>
+  end
+
   # Stick an Ethernet header on the front of a packet.
   defp frame_ether(payload, src_mac, dst_mac) do
     mac_tuple_to_binary(dst_mac) <> mac_tuple_to_binary(src_mac) <>

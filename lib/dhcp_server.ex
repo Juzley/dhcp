@@ -8,6 +8,7 @@ defmodule Dhcp.Server do
 
   @udp Application.get_env(:dhcp, :udp_impl, :gen_udp)
   @packet Application.get_env(:dhcp, :packet_impl, :packet)
+  @inet Application.get_env(:dhcp, :inet_impl, :inet)
 
   @dhcp_server_port 67
   @empty_address {0, 0, 0, 0}
@@ -23,7 +24,7 @@ defmodule Dhcp.Server do
 
   # Client API
 
-  def start_link(_arg) do
+  def start(_arg \\ :ok) do
     GenServer.start_link(__MODULE__, :ok, name: __MODULE__)
   end
 
@@ -90,7 +91,7 @@ defmodule Dhcp.Server do
     mac_info =
       @packet.default_interface()
       |> List.first
-      |> :inet.ifget([:hwaddr])
+      |> @inet.ifget([:hwaddr])
 
     case mac_info do
       {:ok, [hwaddr: mac]} ->

@@ -1,6 +1,10 @@
 defmodule Dhcp.Test.Mock.Timer do
   def apply_after time, _module, _func, args do
-    send(:test_process, {:timer_start, time, args})
+    try do
+      send(:test_process, {:timer_start, time, args})
+    rescue
+      _ -> :ok
+    end
 
     # Return the args as a timer ref, this allows us to check in the test
     # that the correct timer was cancelled
@@ -8,7 +12,11 @@ defmodule Dhcp.Test.Mock.Timer do
   end
 
   def cancel timer_ref do
-    send(:test_process, {:timer_cancel, timer_ref})
+    try do
+      send(:test_process, {:timer_cancel, timer_ref})
+    rescue
+      _ -> :ok
+    end
 
     {:ok, :cancel}
   end
