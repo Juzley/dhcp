@@ -142,7 +142,7 @@ defmodule Dhcp.Server do
   # Handle a discovery packet.
   defp handle_discover(state, packet) do
     req_addr = Map.get(packet.options, :requested_address)
-    req_lease = Map.get(packet.options, :lease_time)
+    req_lease = Map.get(packet.options, :lease_time, 0)
     Logger.info(
       "Received Discover message from #{mac_to_string(packet.chaddr)}," <>
       " requested address #{ipv4_to_string(req_addr)}, " <>
@@ -156,7 +156,7 @@ defmodule Dhcp.Server do
       {:ok, offer_address, offer_lease} ->
         Logger.info(
           "Offering #{ipv4_to_string(offer_address)} to" <>
-          " #{mac_to_string(packet.chaddr)}")
+          " #{mac_to_string(packet.chaddr)} for #{offer_lease} seconds")
         frame_offer(packet, offer_address, offer_lease, state)
         |> send_response(state)
 

@@ -375,6 +375,7 @@ defmodule Dhcp.Binding do
 
   # Determine the length of lease to offer to a client.
   defp offer_lease(_req_lease=nil), do: @max_lease
+  defp offer_lease(_req_lease=0), do: @max_lease
   defp offer_lease(req_lease), do: min(req_lease, @max_lease)
 
   # Find a free address - prefer addresses that haven't already been offered.

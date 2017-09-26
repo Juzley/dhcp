@@ -16,8 +16,21 @@ defmodule Dhcp.ServerTest do
     Packet.frame(@empty_mac, @empty_mac, @empty_addr, @empty_addr, packet)
   end
 
+  defp parse(packet) do
+    {:ok, parsed} = Packet.parse packet
+    parsed
+  end
+
   defp inject(pid, packet) do
     send(pid, {:udp, :dummy_socket, @empty_addr, 67, packet})
+  end
+
+  defp cleanup_dets do
+    try do 
+      :dets.delete_all_objects("bindings.dets")
+    rescue
+      _ -> :ok
+    end
   end
 
   setup_all do
@@ -26,8 +39,12 @@ defmodule Dhcp.ServerTest do
   end
 
   setup do
+    cleanup_dets()
+    on_exit fn -> cleanup_dets() end
+
     true = Process.register(self(), :test_process)
     {:ok, pid} = Server.start()
+
     %{server: pid}
   end
 
@@ -40,8 +57,23 @@ defmodule Dhcp.ServerTest do
                  client_id:    @client_mac}
     }
     framed = frame(packet)
+
     inject(pid, framed)
-    assert_received({:packet, sent_packet})
-    IO.puts sent_packet
+    assert_receive({:packet, sent_packet})
+
+    parsed = parse(sent_packet)
+    assert parsed == %Packet{
+      op: :reply,
+      xid: 1,
+      siaddr: {192, 168, 0, 2},
+      yiaddr: {192, 168, 0, 3},
+      chaddr: @client_mac,
+      options: %{message_type:    :offer,
+                 server_address:  {192, 168, 0, 2},
+                 subnet_mask:     {255, 255, 255, 0},
+                 gateway_address: [{192, 168, 0, 1}],
+                 dns_address:     [{192, 168, 0, 1}],
+                 lease_time:      86400}
+    }
   end
 end

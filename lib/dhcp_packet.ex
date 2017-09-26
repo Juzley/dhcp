@@ -219,6 +219,17 @@ defmodule Dhcp.Packet do
                                      ipv4_binary_to_tuple(addr))
   end
 
+  # Values represented by several IPv4 addresses.
+  defp parse_options(
+    <<option::8, len::8, tail::binary>>, options) when option in [3, 6] do
+    <<addrs :: binary-size(len), remainder :: binary>> = tail
+    addr_list =
+      for <<addr :: binary-size(4) <- addrs>>, do: ipv4_binary_to_tuple(addr)
+    parse_options remainder, Map.put(options,
+                                     convert_option(option),
+                                     addr_list)
+  end
+
   # Other 4-byte values, such as lease times.
   defp parse_options(
     <<option::8, 4::8, value::big-unsigned-size(32),
@@ -227,9 +238,9 @@ defmodule Dhcp.Packet do
   end
 
   # Skip other option types that we don't support
-  defp parse_options(<<_option::8, len::8, remainder::binary>>, options) do
-    <<_value :: binary-size(len), new_remainder :: binary>> = remainder
-    parse_options(new_remainder, options)
+  defp parse_options(<<_option::8, len::8, tail::binary>>, options) do
+    <<_value :: binary-size(len), remainder :: binary>> = tail
+    parse_options(remainder, options)
   end
 
   # Stop parsing options if we don't recognize the format.
