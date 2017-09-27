@@ -1,4 +1,8 @@
 defmodule Dhcp.Server do
+  @moduledoc """
+    This module implements a GenServer which handles DHCP requests.
+  """
+
   use GenServer
   require Logger
 
@@ -23,6 +27,11 @@ defmodule Dhcp.Server do
   # TODO: DHCPInform, DHCPDecline
 
   # Client API
+
+  def start_link(_state) do
+    start()
+  end
+
 
   def start(_arg \\ :ok) do
     GenServer.start_link(__MODULE__, :ok, name: __MODULE__)
@@ -49,7 +58,7 @@ defmodule Dhcp.Server do
   # Initialize the unicast receive socket.
   defp init_ucast_rx_socket({:ok, state}) do
     case result = @udp.open(@dhcp_server_port,
-                            [:binary]) do
+                            [:binary, {:ifaddr, @server_address}]) do
       {:ok, socket} ->
         {:ok, Map.put(state, :ucast_rx_socket, socket)}
 

@@ -19,6 +19,10 @@ defmodule Dhcp.Binding do
 
   # Client API
 
+  def start_link(_state) do
+    start()
+  end
+
   @doc """
   Starts the GenServer.
   """
