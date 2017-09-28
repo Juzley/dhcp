@@ -29,7 +29,8 @@ defmodule Dhcp.Mixfile do
     [
       {:pkt, github: "msantos/pkt", tag: "0.4.4"},
       {:procket, github: "msantos/procket", tag: "0.8.0"},
-      {:timex, "~> 3.1"}
+      {:timex, "~> 3.1"},
+      {:distillery, "~> 1.4", runtime: false}
     ]
   end
 
