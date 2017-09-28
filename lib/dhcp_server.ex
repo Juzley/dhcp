@@ -17,13 +17,13 @@ defmodule Dhcp.Server do
   @dhcp_server_port 67
   @empty_address {0, 0, 0, 0}
   @broadcast_address {255, 255, 255, 255}
+  @broadcast_mac {255, 255, 255, 255, 255, 255}
 
   @server_address Application.fetch_env!(:dhcp, :server_address)
   @gateway_address Application.fetch_env!(:dhcp, :gateway_address)
   @dns_address Application.fetch_env!(:dhcp, :dns_address)
   @subnet_mask Application.fetch_env!(:dhcp, :subnet_mask)
 
-  # TODO: Broadcast bit handling
   # TODO: DHCPInform, DHCPDecline
 
   # Client API
@@ -126,6 +126,15 @@ defmodule Dhcp.Server do
     end
   end
 
+  # We don't support multiple subnets, relay etc - ignore packets with a
+  # non-zero giaddr.
+  defp handle_packet(state, %Packet{giaddr: giaddr})
+    when giaddr !== @empty_address do
+    Logger.error "Ignoring DHCP message with non-zero giaddr"
+
+    state
+  end
+
   # Handle a successfully parsed DHCP packet.
   defp handle_packet(state, packet) do
     case Map.get(packet.options, :message_type, :no_type) do
@@ -196,13 +205,13 @@ defmodule Dhcp.Server do
             "Allocated #{ipv4_to_string(requested_address)} to" <>
             " #{mac_to_string(packet.chaddr)} for #{lease} seconds," <>
             " sending Ack")
-        frame_ack(packet, addr, lease, state) |> send_response(state)
+          frame_ack(packet, addr, lease, state) |> send_response(state)
 
         {:error, reason} ->
           Logger.error(
             "Failed to allocate #{ipv4_to_string(requested_address)} to" <>
             " #{mac_to_string(packet.chaddr)}: #{reason}, sending Nak")
-        frame_nak(packet, requested_address, state) |> send_response(state)
+          frame_nak(packet, state) |> send_response(state)
       end
     else
       # Forget any offers etc if the request is for a different server.
@@ -239,11 +248,14 @@ defmodule Dhcp.Server do
 
   # Frame a DHCPOFFER
   defp frame_offer(req_packet, offer_addr, offer_lease, state) do
+    {dst_mac, dst_addr} = reply_addrs(
+      req_packet.broadcast_flag, req_packet.ciaddr, req_packet.chaddr,
+      offer_addr)
     Packet.frame(
       state.src_mac,
-      req_packet.chaddr,
+      dst_mac,
       @server_address,
-      offer_addr,
+      dst_addr,
       %Packet{
         op: :reply,
         xid: req_packet.xid,
@@ -265,11 +277,13 @@ defmodule Dhcp.Server do
 
   # Frame a DHCPACK
   defp frame_ack(req_packet, addr, lease, state) do
+    {dst_mac, dst_addr} = reply_addrs(
+      req_packet.broadcast_flag, req_packet.ciaddr, req_packet.chaddr, addr)
     Packet.frame(
       state.src_mac,
-      req_packet.chaddr,
+      dst_mac,
       @server_address,
-      addr,
+      dst_addr,
       %Packet{
         op: :reply,
         xid: req_packet.xid,
@@ -290,12 +304,12 @@ defmodule Dhcp.Server do
   end
 
   # Frame a DHCPNAK
-  defp frame_nak(req_packet, req_addr, state) do
+  defp frame_nak(req_packet, state) do
     Packet.frame(
       state.src_mac,
-      req_packet.chaddr,
+      @broadcast_mac,
       @server_address,
-      req_addr,
+      @broadcast_address,
       %Packet{ op: :reply,
          xid: req_packet.xid,
          ciaddr: @empty_address,
@@ -312,5 +326,24 @@ defmodule Dhcp.Server do
   # Send a framed response to a client.
   defp send_response(packet, state) do
     :ok = @packet.send(state.tx_socket, state.ifindex, packet)
+  end
+
+  # Return addresses to send offer/acks to. Note that we ignore the giaddr
+  # field, we don't support different subnets.
+  # In this clause, the address isn't already allocated, and the client has
+  # requested a broadcast.
+  defp reply_addrs(_bcast=true, _ciaddr=@empty_address, _chaddr, _addr) do
+    {@broadcast_mac, @broadcast_address}
+  end
+
+  # In this clause, the address isn't already allocated, and the client does
+  # not require the response to be broadcast.
+  defp reply_addrs(_bcast=false, _ciaddr=@empty_address, chaddr, addr) do
+    {chaddr, addr}
+  end
+
+  # In this clause, the address is already allocated, so we can respond to it.
+  defp reply_addrs(_broadcast, ciaddr, chaddr, _addr) do
+    {chaddr, ciaddr}
   end
 end

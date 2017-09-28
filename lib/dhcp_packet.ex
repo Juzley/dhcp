@@ -286,9 +286,12 @@ defmodule Dhcp.Packet do
       1 -> :discover
       2 -> :offer
       3 -> :request
+      4 -> :decline
       5 -> :ack
       6 -> :nak
       7 -> :release
+      8 -> :inform
+      _ -> type
     end
   end
   defp convert_message_type(type) when is_atom(type) do
@@ -296,9 +299,12 @@ defmodule Dhcp.Packet do
       :discover -> 1
       :offer -> 2
       :request -> 3
+      :decline -> 4
       :ack -> 5
       :nak -> 6
       :release -> 7
+      :inform -> 8
+      _ -> 0
     end
   end
 
