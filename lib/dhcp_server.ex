@@ -296,15 +296,15 @@ defmodule Dhcp.Server do
       req_packet.chaddr,
       @server_address,
       req_addr,
-      %{ op: :reply,
+      %Packet{ op: :reply,
          xid: req_packet.xid,
          ciaddr: @empty_address,
          yiaddr: @empty_address,
          siaddr: @empty_address,
          giaddr: @empty_address,
          chaddr: req_packet.chaddr,
-         options: %{ :message_type   => :nak,
-                     :server_address => @server_address
+         options: %{message_type:   :nak,
+                    server_address: @server_address
          }
       })
   end
