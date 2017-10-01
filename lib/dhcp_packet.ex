@@ -59,6 +59,7 @@ defmodule Dhcp.Packet do
   defp frame_options(options) do
     options
     |> Map.to_list
+    |> Enum.sort_by(&(if match?({:message_type, _}, &1), do: 0, else: 1))
     |> Enum.map(&frame_option/1)
     |> List.foldr(<<>>, fn(option, acc) -> option <> acc end)
   end
@@ -109,9 +110,11 @@ defmodule Dhcp.Packet do
     ipv4_len = udp_len + 20
     ipv4_info = ipv4(saddr: src_addr, daddr: dst_addr, len: ipv4_len, p: 17)
     udp_info = udp(sport: 67, dport: 68, ulen: udp_len)
-    ipv4_sum = :pkt.makesum([ipv4_info, udp_info, payload])
+    ipv4_sum = :pkt.makesum(ipv4_info)
+    udp_sum = :pkt.makesum([ipv4_info, udp_info, payload])
 
-    :pkt.ipv4(ipv4(ipv4_info, sum: ipv4_sum)) <> :pkt.udp(udp_info) <> payload 
+    :pkt.ipv4(ipv4(ipv4_info, sum: ipv4_sum)) <>
+      :pkt.udp(udp(udp_info, sum: udp_sum)) <> payload 
   end
 
   @doc """
