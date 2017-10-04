@@ -144,33 +144,29 @@ defmodule Dhcp.Binding do
     |> (&({:noreply, &1})).()
   end
 
-  # Handle an offer for a currently bound client.
+  # Handle an offer for a currently bound client - just return the existing
+  # parameters.
   defp handle_offer({:allocated, %{addr: addr, lease_expiry: lease_expiry}},
-                   _client_mac, _req_addr, req_lease, state) do
-    new_lease = if req_lease do
-      min(req_lease, @max_lease)
-    else
-      lease_expiry - unix_now()
-    end
-
-    make_reply(state, addr, new_lease)
+                    _client_mac, _req_addr, _req_lease, state) do
+    make_reply(state, addr, lease_expiry - unix_now(), lease_expiry)
   end
 
   # Handle an offer for a client for which there is no existing binding info.
   defp handle_offer(_binding = nil, client_mac, req_addr, req_lease, state) do
     new_lease = offer_lease(req_lease)
+    new_expiry = unix_now() + new_lease
     new_addr = free_address(state)
 
     cond do
       address_available?(state, req_addr) ->
         state
-        |> update_bindings(client_mac, :offered, req_addr, new_lease)
-        |> make_reply(req_addr, new_lease)
+        |> update_bindings(client_mac, :offered, req_addr, new_lease, new_expiry)
+        |> make_reply(req_addr, new_lease, new_expiry)
 
       new_addr ->
         state
-        |> update_bindings(client_mac, :offered, new_addr, new_lease)
-        |> make_reply(new_addr, new_lease)
+        |> update_bindings(client_mac, :offered, new_addr, new_lease, new_expiry)
+        |> make_reply(new_addr, new_lease, new_expiry)
 
       true ->
         {:reply, {:error, :no_addresses}, state}
@@ -181,20 +177,21 @@ defmodule Dhcp.Binding do
   defp handle_offer({:released, %{addr: addr}},
                    client_mac, _req_addr, req_lease, state) do
     new_lease = offer_lease(req_lease)
+    new_expiry = unix_now() + new_lease
     new_addr = free_address(state)
 
     cond do
       address_available?(state, addr) ->
         # The old address is still available.
         state
-        |> update_bindings(client_mac, :offered, addr, new_lease)
-        |> make_reply(addr, new_lease)
+        |> update_bindings(client_mac, :offered, addr, new_lease, new_expiry)
+        |> make_reply(addr, new_lease, new_expiry)
 
       new_addr ->
         # Use a newly allocated address.
         state
-        |> update_bindings(client_mac, :offered, new_addr, new_lease)
-        |> make_reply(addr, new_lease)
+        |> update_bindings(client_mac, :offered, new_addr, new_lease, new_expiry)
+        |> make_reply(addr, new_lease, new_expiry)
 
       true ->
         # No addresses left.
@@ -207,26 +204,27 @@ defmodule Dhcp.Binding do
   defp handle_offer({:offered, %{addr: addr}},
                    client_mac, req_addr, req_lease, state) do
     new_lease = offer_lease(req_lease)
+    new_expiry = unix_now() + new_lease
     new_addr = free_address(state)
 
     cond do
       address_available?(state, req_addr) ->
         # The requested address is acceptable.
         state
-        |> update_bindings(client_mac, :offered, req_addr, new_lease)
-        |> make_reply(req_addr, new_lease)
+        |> update_bindings(client_mac, :offered, req_addr, new_lease, new_expiry)
+        |> make_reply(req_addr, new_lease, new_expiry)
 
       address_available?(state, addr) ->
         # The address that was already offered is still acceptable.
         state
-        |> update_bindings(client_mac, :offered, addr, new_lease)
-        |> make_reply(addr, new_lease)
+        |> update_bindings(client_mac, :offered, addr, new_lease, new_expiry)
+        |> make_reply(addr, new_lease, new_expiry)
 
       new_addr ->
         # Use a newly allocated address.
         state
-        |> update_bindings(client_mac, :offered, new_addr, new_lease)
-        |> make_reply(new_addr, new_lease)
+        |> update_bindings(client_mac, :offered, new_addr, new_lease, new_expiry)
+        |> make_reply(new_addr, new_lease, new_expiry)
 
       true ->
         # No addresses left.
@@ -238,21 +236,21 @@ defmodule Dhcp.Binding do
   defp handle_allocate(_binding=nil, client_mac, req_addr, req_lease, state) do
     # We don't expect this to happen, but handle it as if we had made an offer.
     new_lease = offer_lease(req_lease)
-    handle_allocate({:offered, %{lease_time: new_lease}},
+    new_expiry = unix_now() + new_lease
+    handle_allocate({:offered,
+                      %{lease_time: new_lease, lease_expiry: new_expiry}},
                     client_mac, req_addr, req_lease, state)
   end
 
   # Handle a request from a client to which we have made an offer.
-  defp handle_allocate({:offered, %{lease_time: lease_time}},
-                       client_mac, addr, _req_lease, state) do
+  defp handle_allocate(
+    {:offered, %{lease_time: lease_time, lease_expiry: lease_expiry}},
+    client_mac, addr, _req_lease, state) do
     if address_available?(state, addr) do
-      # TODO: Should we have started the expiry time from when we offered?
-      expiry = unix_now() + lease_time
-
       state
-      |> update_bindings(client_mac, :allocated, addr, lease_time, expiry)
-      |> start_timer(client_mac, addr, lease_time)
-      |> make_reply(addr, lease_time)
+      |> update_bindings(client_mac, :allocated, addr, lease_time, lease_expiry)
+      |> start_timer(client_mac, addr, lease_expiry - unix_now())
+      |> make_reply(addr, lease_time, lease_expiry)
     else
       {:reply, {:error, :address_allocated}, state}
     end
@@ -260,25 +258,34 @@ defmodule Dhcp.Binding do
 
   # Handle a request from a client which is already bound.
   defp handle_allocate(
-    {:allocated, %{addr: cur_addr, lease_expiry: lease_expiry}},
-    client_mac, _addr, req_lease, state) do
+    {:allocated, %{addr: cur_addr, lease_time: lease_time, lease_expiry: lease_expiry}},
+    client_mac, addr, req_lease, state) do
     if req_lease do
       # Extending an existing lease.
       new_lease = min(req_lease, @max_lease)
+      new_expiry = unix_now() + new_lease
 
       state
+      |> update_bindings(client_mac, :allocated, addr, new_lease, new_expiry)
       |> restart_timer(client_mac, cur_addr, new_lease)
-      |> make_reply(cur_addr, new_lease)
+      |> make_reply(cur_addr, new_lease, new_expiry)
 
     else
       # Return the current information.
-      make_reply(state, cur_addr, lease_expiry - unix_now())
+      make_reply(state, cur_addr, lease_time, lease_expiry)
     end
   end
 
   # Make a genserver reply with lease info, for handling offer and allocate
   # calls.
-  defp make_reply(state, addr, lease), do: {:reply, {:ok, addr, lease}, state}
+  defp make_reply(state, addr, lease_length, expiry_time) do
+    orig_lease_length = expiry_time - lease_length
+    renewal_time = div(orig_lease_length, 2) + lease_length
+    rebind_time = div(orig_lease_length * 3, 8) + lease_length
+    renewal_length = max(0, renewal_time - unix_now())
+    rebind_length = max(0, rebind_time - unix_now())
+    {:reply, {:ok, addr, lease_length, renewal_length, rebind_length}, state}
+  end
 
   # Update the state with a new binding, returning the new state.
   defp update_bindings(state, client_mac, class, addr, lease_time \\ nil,

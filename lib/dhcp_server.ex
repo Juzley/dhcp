@@ -171,7 +171,7 @@ defmodule Dhcp.Server do
                                            req_addr: req_addr,
                                            req_lease: req_lease)
     case offer_info do
-      {:ok, offer_address, offer_lease} ->
+      {:ok, offer_address, offer_lease, _renewal, _rebind} ->
         Logger.info(
           "Offering #{ipv4_to_string(offer_address)} to" <>
           " #{mac_to_string(packet.chaddr)} for #{offer_lease} seconds")
@@ -200,12 +200,13 @@ defmodule Dhcp.Server do
                                         packet.chaddr,
                                         requested_address)
       case result do
-        {:ok, addr, lease} ->
+        {:ok, addr, lease, renewal, rebind} ->
           Logger.info(
             "Allocated #{ipv4_to_string(requested_address)} to" <>
             " #{mac_to_string(packet.chaddr)} for #{lease} seconds," <>
             " sending Ack")
-          frame_ack(packet, addr, lease, state) |> send_response(state)
+            frame_ack(packet, addr, lease, renewal, rebind, state)
+            |> send_response(state)
 
         {:error, reason} ->
           Logger.error(
@@ -275,7 +276,7 @@ defmodule Dhcp.Server do
   end
 
   # Frame a DHCPACK
-  defp frame_ack(req_packet, addr, lease, state) do
+  defp frame_ack(req_packet, addr, lease, renewal, rebind, state) do
     {dst_mac, dst_addr} = reply_addrs(
       req_packet.broadcast_flag, req_packet.ciaddr, req_packet.chaddr, addr)
     Packet.frame(
@@ -295,6 +296,8 @@ defmodule Dhcp.Server do
                     :gateway_address  => [@gateway_address],
                     :dns_address      => [@dns_address],
                     :lease_time       => lease,
+                    :renewal_time     => renewal,
+                    :rebinding_time   => rebind,
                     :server_address   => @server_address
         }
       }
