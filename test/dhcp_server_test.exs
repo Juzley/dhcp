@@ -77,7 +77,6 @@ defmodule Dhcp.Test.Server do
     assert parsed == %Packet{
       op: :reply,
       xid: 1,
-      siaddr: {192, 168, 0, 2},
       yiaddr: {192, 168, 0, 3},
       chaddr: @client_mac1,
       options: %{message_type:    :offer,
@@ -107,7 +106,6 @@ defmodule Dhcp.Test.Server do
     assert parsed == %Packet{
       op: :reply,
       xid: 2,
-      siaddr: {192, 168, 0, 2},
       yiaddr: {192, 168, 0, 3},
       chaddr: @client_mac1,
       options: %{message_type:    :ack,
@@ -115,7 +113,9 @@ defmodule Dhcp.Test.Server do
                  subnet_mask:     {255, 255, 255, 0},
                  gateway_address: [{192, 168, 0, 1}],
                  dns_address:     [{192, 168, 0, 1}],
-                 lease_time:      86400}
+                 lease_time:      86400,
+                 renewal_time: 43200,
+                 rebinding_time: 75600}
     }
   end
 
@@ -123,13 +123,13 @@ defmodule Dhcp.Test.Server do
     %{server: server_pid, bindings: bindings_pid} do
     assert Dhcp.Binding.allocate_address(
       bindings_pid, @client_mac1, {192, 168, 0, 3}) ==
-      {:ok, {192, 168, 0, 3}, 86400}
+      {:ok, {192, 168, 0, 3}, 86400, 43200, 75600}
     assert Dhcp.Binding.allocate_address(
       bindings_pid, @client_mac2, {192, 168, 0, 4}) ==
-      {:ok, {192, 168, 0, 4}, 86400}
+      {:ok, {192, 168, 0, 4}, 86400, 43200, 75600}
     assert Dhcp.Binding.allocate_address(
       bindings_pid, @client_mac3, {192, 168, 0, 5}) ==
-      {:ok, {192, 168, 0, 5}, 86400}
+      {:ok, {192, 168, 0, 5}, 86400, 43200, 75600}
 
     %Packet{
       op: :request,
@@ -148,7 +148,7 @@ defmodule Dhcp.Test.Server do
     %{server: server_pid, bindings: bindings_pid} do
     assert Dhcp.Binding.allocate_address(
       bindings_pid, @client_mac1, {192, 168, 0, 3}) ==
-      {:ok, {192, 168, 0, 3}, 86400}
+      {:ok, {192, 168, 0, 3}, 86400, 43200, 75600}
 
     %Packet{
       op: :request,
@@ -193,7 +193,7 @@ defmodule Dhcp.Test.Server do
     # Check that we didn't allocate the address
     assert Dhcp.Binding.allocate_address(
       bindings_pid, @client_mac2, {192, 168, 0, 3}) ==
-      {:ok, {192, 168, 0, 3}, 86400}
+      {:ok, {192, 168, 0, 3}, 86400, 43200, 75600}
   end
 
 end

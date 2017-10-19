@@ -269,6 +269,7 @@ defmodule Dhcp.Binding do
     new_time = offer_lease(req_lease)
     new_end = new_start + new_time
     lease_info = %{
+      addr: req_addr,
       lease_start: new_start,
       lease_time: new_time,
       lease_end: new_end}
